@@ -18,6 +18,8 @@
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
    of thread.h for details. */
+/* 스레드의 스택 오버플로우를 감지하기 위한 값으로 스레드가 생성될 때 무작위로 할당되며, 
+스택 오버플로우가 발생하면 이 값을 검사하여 오버플로우가 발생했는지 여부를 확인 */
 #define THREAD_MAGIC 0xcd6abf4b
 
 /* Random value for basic thread
@@ -26,18 +28,25 @@
 
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
+/* Thread_ready 상태인 프로세스의 리스트로 실행될 준비는 되었지만 실제로 실행되고 있지는 않음 */
 static struct list ready_list;
 
+static struct list  sleep_list;
+
 /* Idle thread. */
+/* 유휴 상태의 스레드 */
 static struct thread *idle_thread;
 
 /* Initial thread, the thread running init.c:main(). */
+/* 첫 스레드로 init.c:main()을 실행함 */
 static struct thread *initial_thread;
 
 /* Lock used by allocate_tid(). */
+/* allocate_tid() 함수에 쓰이는 락 */
 static struct lock tid_lock;
 
 /* Thread destruction requests */
+/* 스레드가 종료될 때 해당 스레드의 자원을 해제하기 위해 스레드가 요청하는 구조체 */
 static struct list destruction_req;
 
 /* Statistics. */
@@ -62,8 +71,10 @@ static void init_thread (struct thread *, const char *name, int priority);
 static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
+void thread_sleep(int64_t ticks);
 
 /* Returns true if T appears to point to a valid thread. */
+/* 스레드가 유효한 스레드를 가리키는지 확인하는 매크로로 스레드가 NULL이 아니고 magic 필드가 THREAD_MAGIC과 같은지 확인 */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
 
 /* Returns the running thread.
@@ -71,12 +82,19 @@ static tid_t allocate_tid (void);
  * down to the start of a page.  Since `struct thread' is
  * always at the beginning of a page and the stack pointer is
  * somewhere in the middle, this locates the curent thread. */
+/* 실행중인 스레드를 반환하는 매크로로,
+cpu의 스택 포인터 rsp를 읽은 다음 이를 페이지의 시작 부분으로 내림한다. 
+struct thread가 항상 페이지의 시작 부분에 있고 스택 포인터는 중간에 있으므로 이렇게 하면
+현재 스레드를 찾을 수 있다. pg_round_down은 주소를 PGSIZE의 배수로 반올림 하는 매크로 */
 #define running_thread() ((struct thread *) (pg_round_down (rrsp ())))
 
 
 // Global descriptor table for the thread_start.
 // Because the gdt will be setup after the thread_init, we should
 // setup temporal gdt first.
+/* x86_64 아키텍처에서 사용되는 GDT(Global Descriptor Table)을 설정 
+GDT는 메모리 세그먼트를 정의하고, 각 세그먼트에 대한 권한을 설정하는데 사용됨
+이 코드에서는 3개의 세그먼트를 정의 */
 static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
 
 /* Initializes the threading system by transforming the code
@@ -92,6 +110,10 @@ static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
 
    It is not safe to call thread_current() until this function
    finishes. */
+/* 스레드 시스템을 초기화 하는 함수로 현재 실행 중인 코드를 스레드로 변환한다.
+일반적으로는 작동하지 않으며, 이 경우에만 가능하다. 
+함수를 호출한 후 페이지 할당기를 초기화 한 다음 thread_create()를 사용하여
+스레드를 생성하기 전에 thread_current()를 호출하는 것은  안전하지 않다.*/
 void
 thread_init (void) {
 	ASSERT (intr_get_level () == INTR_OFF);
@@ -99,6 +121,7 @@ thread_init (void) {
 	/* Reload the temporal gdt for the kernel
 	 * This gdt does not include the user context.
 	 * The kernel will rebuild the gdt with user context, in gdt_init (). */
+	/* 커널을 위한 임시 GDT를 다시 로드한다. */
 	struct desc_ptr gdt_ds = {
 		.size = sizeof (gdt) - 1,
 		.address = (uint64_t) gdt
@@ -106,11 +129,14 @@ thread_init (void) {
 	lgdt (&gdt_ds);
 
 	/* Init the globla thread context */
+	/* 전역 스레드 컨텍스트를 초기화한다. */
 	lock_init (&tid_lock);
 	list_init (&ready_list);
+	list_init (&sleep_list);
 	list_init (&destruction_req);
 
 	/* Set up a thread structure for the running thread. */
+	/* 실행 중인 스레드에 대한 스레드 구조체를 설정한다. */
 	initial_thread = running_thread ();
 	init_thread (initial_thread, "main", PRI_DEFAULT);
 	initial_thread->status = THREAD_RUNNING;
@@ -119,17 +145,22 @@ thread_init (void) {
 
 /* Starts preemptive thread scheduling by enabling interrupts.
    Also creates the idle thread. */
+/* 스레드 시스템을 초기화하고 스레드 스케줄링을 시작하는데 사용, 스레드 관리를 담당 */
+/* 인터럽트를 활성화하여 선점형 스레드 스케줄링을 시작하고 유휴 스레드를 생성 */
 void
 thread_start (void) {
 	/* Create the idle thread. */
+	/* 유휴 스레드 생성 */
 	struct semaphore idle_started;
 	sema_init (&idle_started, 0);
 	thread_create ("idle", PRI_MIN, idle, &idle_started);
 
 	/* Start preemptive thread scheduling. */
+	/* 선점형 스레드 스케줄링을 시작 */
 	intr_enable ();
 
 	/* Wait for the idle thread to initialize idle_thread. */
+	/* 유휴 스레드가 초기화될 때까지 기다림 */
 	sema_down (&idle_started);
 }
 
@@ -587,4 +618,24 @@ allocate_tid (void) {
 	lock_release (&tid_lock);
 
 	return tid;
+}
+
+int64_t find_minimum_sleep_list(void) {
+}
+
+void thread_sleep(int64_t ticks) {
+	struct thread *t = thread_current();
+	if (!t->status == idle_thread) {
+		t->status = THREAD_BLOCKED;
+		t->wakeup_tick = ticks;
+
+		if 
+	}
+	
+	/* if the current thread is not idle thread,
+		change the state of the caller thread to BLOCKED,
+		store the local tick to wake up,
+		update the global tick if necessary,
+		and call schedule()*/
+	/* when you manipulate thread list, disable interrupt */
 }
