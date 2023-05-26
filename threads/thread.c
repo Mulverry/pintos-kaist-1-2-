@@ -623,9 +623,9 @@ allocate_tid (void) {
 int64_t return_minimum(struct list *list) {
 	enum intr_level old_level;
 	old_level = intr_disable();
-	list_less_func *func_ptr = _list_less_func;
+	// list_less_func *func_ptr = _list_less_func;
 	int64_t *global_tick;
-	global_tick = list_entry(list_min(&sleep_list, func_ptr, thread_ticks), struct thread, elem)->wakeup_tick;
+	global_tick = list_entry(list_min(&sleep_list, _list_less_func, kernel_ticks), struct thread, elem)->wakeup_tick;
 	intr_set_level (old_level);
 	return global_tick;
 }
@@ -634,7 +634,7 @@ int64_t return_minimum(struct list *list) {
 // 	enum intr_level old_level;
 // 	old_level = intr_disable();
 // 	list_less_func *func_ptr = _list_less_func;
-// 	list_sort(&sleep_list, func_ptr, NULL);
+// 	list_sort(&sleep_list, func_ptr, );
 // 	intr_set_level (old_level);
 // } 
 
@@ -654,7 +654,7 @@ void thread_sleep(int64_t ticks) {
 		// printf('&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&');
 		t->status = THREAD_BLOCKED;
 		t->wakeup_tick = ticks;
-		list_push_back(&sleep_list, &t->elem);
+		list_push_back(&sleep_list, &(t->elem));
 		// thread_block();
 		schedule();
 	}
@@ -675,13 +675,13 @@ void thread_wakeup(void) {
 	int64_t global_tick = return_minimum(&sleep_list);
 	while (!list_empty(&sleep_list)) {
 		struct thread *next_ready;
-		list_less_func *func_ptr = _list_less_func;
+		// list_less_func *func_ptr = _list_less_func;
 		// next_ready = list_entry(list_front(&sleep_list), struct thread, elem);
-		next_ready = list_entry(list_min(&sleep_list, func_ptr, thread_ticks), struct thread, elem);
+		next_ready = list_entry(list_min(&sleep_list, _list_less_func, global_tick), struct thread, elem);
 		if (next_ready->wakeup_tick <= global_tick) {
-			list_push_back(&ready_list, next_ready);
+			list_push_back(&ready_list, &(next_ready->elem));
 			next_ready->status = THREAD_READY;
-			list_remove(next_ready);
+			list_remove(&(next_ready->elem));
 			global_tick = return_minimum(&sleep_list);
 		} else {
 			break;
