@@ -117,7 +117,6 @@ static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
 void
 thread_init (void) {
 	ASSERT (intr_get_level () == INTR_OFF);
-
 	/* Reload the temporal gdt for the kernel
 	 * This gdt does not include the user context.
 	 * The kernel will rebuild the gdt with user context, in gdt_init (). */
@@ -127,7 +126,6 @@ thread_init (void) {
 		.address = (uint64_t) gdt
 	};
 	lgdt (&gdt_ds);
-
 	/* Init the globla thread context */
 	/* 전역 스레드 컨텍스트를 초기화한다. */
 	lock_init (&tid_lock);
@@ -141,6 +139,7 @@ thread_init (void) {
 	init_thread (initial_thread, "main", PRI_DEFAULT);
 	initial_thread->status = THREAD_RUNNING;
 	initial_thread->tid = allocate_tid ();
+	// printf('~!~!~!~!~!~!~!~!~!~!~!!!!~!~!~!~!~!');
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -154,7 +153,7 @@ thread_start (void) {
 	struct semaphore idle_started;
 	sema_init (&idle_started, 0);
 	thread_create ("idle", PRI_MIN, idle, &idle_started);
-
+	// printf('*********************^^********************');
 	/* Start preemptive thread scheduling. */
 	/* 선점형 스레드 스케줄링을 시작 */
 	intr_enable ();
@@ -620,17 +619,46 @@ allocate_tid (void) {
 	return tid;
 }
 
-int64_t find_minimum_sleep_list(void) {
+
+int64_t return_minimum(struct list *list) {
+	enum intr_level old_level;
+	old_level = intr_disable();
+	list_less_func *func_ptr = _list_less_func;
+	int64_t *global_tick;
+	global_tick = list_entry(list_min(&sleep_list, func_ptr, thread_ticks), struct thread, elem)->wakeup_tick;
+	intr_set_level (old_level);
+	return global_tick;
 }
 
+// void find_minimum_sleep_list(void) {
+// 	enum intr_level old_level;
+// 	old_level = intr_disable();
+// 	list_less_func *func_ptr = _list_less_func;
+// 	list_sort(&sleep_list, func_ptr, NULL);
+// 	intr_set_level (old_level);
+// } 
+
+// bool _list_less_func (const struct list_elem *a, const struct list_elem *b, void *aux) {
+// 	if (list_entry(a, struct thread, elem)->wakeup_tick < list_entry(b, struct thread, elem)->wakeup_tick)
+// 		return true;
+//     else return false;
+// }
+
 void thread_sleep(int64_t ticks) {
+	// debug_backtrace();
 	struct thread *t = thread_current();
-	if (!t->status == idle_thread) {
+	enum intr_level old_level;
+	// printf('#######################################################');
+	old_level = intr_disable();
+	if (t->status != idle_thread) {
+		// printf('&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&');
 		t->status = THREAD_BLOCKED;
 		t->wakeup_tick = ticks;
-
-		if 
+		list_push_back(&sleep_list, &t->elem);
+		// thread_block();
+		schedule();
 	}
+	intr_set_level (old_level);
 	
 	/* if the current thread is not idle thread,
 		change the state of the caller thread to BLOCKED,
@@ -638,4 +666,26 @@ void thread_sleep(int64_t ticks) {
 		update the global tick if necessary,
 		and call schedule()*/
 	/* when you manipulate thread list, disable interrupt */
+}
+
+void thread_wakeup(void) {
+	enum intr_level old_level;
+	old_level = intr_disable();
+	// find_minimum_sleep_list();
+	int64_t global_tick = return_minimum(&sleep_list);
+	while (!list_empty(&sleep_list)) {
+		struct thread *next_ready;
+		list_less_func *func_ptr = _list_less_func;
+		// next_ready = list_entry(list_front(&sleep_list), struct thread, elem);
+		next_ready = list_entry(list_min(&sleep_list, func_ptr, thread_ticks), struct thread, elem);
+		if (next_ready->wakeup_tick <= global_tick) {
+			list_push_back(&ready_list, next_ready);
+			next_ready->status = THREAD_READY;
+			list_remove(next_ready);
+			global_tick = return_minimum(&sleep_list);
+		} else {
+			break;
+		}
+	}
+	intr_set_level (old_level);
 }

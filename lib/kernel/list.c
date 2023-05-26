@@ -1,5 +1,6 @@
 #include "list.h"
 #include "../debug.h"
+#include "../../include/threads/thread.h"
 
 /* Our doubly linked lists have two header elements: the "head"
    just before the first element and the "tail" just after the
@@ -30,6 +31,7 @@
    without sacrificing this simplicity.  But using two separate
    elements allows us to do a little bit of checking on some
    operations, which can be valuable.) */
+
 
 static bool is_sorted (struct list_elem *a, struct list_elem *b,
 		list_less_func *less, void *aux) UNUSED;
@@ -486,4 +488,10 @@ list_min (struct list *list, list_less_func *less, void *aux) {
 				min = e;
 	}
 	return min;
+}
+
+bool _list_less_func (const struct list_elem *a, const struct list_elem *b, void *aux) {
+	if (list_entry(a, struct thread, elem)->wakeup_tick < list_entry(b, struct thread, elem)->wakeup_tick)
+		return true;
+    else return false;
 }
