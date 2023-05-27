@@ -31,7 +31,7 @@
 /* Thread_ready 상태인 프로세스의 리스트로 실행될 준비는 되었지만 실제로 실행되고 있지는 않음 */
 static struct list ready_list;
 
-static struct list  sleep_list;
+static struct list sleep_list;
 
 /* Idle thread. */
 /* 유휴 상태의 스레드 */
@@ -619,73 +619,33 @@ allocate_tid (void) {
 	return tid;
 }
 
-
-int64_t return_minimum(struct list *list) {
-	enum intr_level old_level;
-	old_level = intr_disable();
-	// list_less_func *func_ptr = _list_less_func;
-	int64_t *global_tick;
-	global_tick = list_entry(list_min(&sleep_list, _list_less_func, kernel_ticks), struct thread, elem)->wakeup_tick;
-	intr_set_level (old_level);
-	return global_tick;
-}
-
-// void find_minimum_sleep_list(void) {
-// 	enum intr_level old_level;
-// 	old_level = intr_disable();
-// 	list_less_func *func_ptr = _list_less_func;
-// 	list_sort(&sleep_list, func_ptr, );
-// 	intr_set_level (old_level);
-// } 
-
-// bool _list_less_func (const struct list_elem *a, const struct list_elem *b, void *aux) {
-// 	if (list_entry(a, struct thread, elem)->wakeup_tick < list_entry(b, struct thread, elem)->wakeup_tick)
-// 		return true;
-//     else return false;
-// }
-
 void thread_sleep(int64_t ticks) {
-	// debug_backtrace();
-	struct thread *t = thread_current();
+	struct thread *t= thread_current();
 	enum intr_level old_level;
-	// printf('#######################################################');
 	old_level = intr_disable();
 	if (t->status != idle_thread) {
-		// printf('&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&');
-		t->status = THREAD_BLOCKED;
 		t->wakeup_tick = ticks;
-		list_push_back(&sleep_list, &(t->elem));
-		// thread_block();
+		t->status = THREAD_BLOCKED;
+		list_insert_ordered(&sleep_list, &(t->elem), _list_less_func, NULL);
 		schedule();
 	}
-	intr_set_level (old_level);
-	
-	/* if the current thread is not idle thread,
-		change the state of the caller thread to BLOCKED,
-		store the local tick to wake up,
-		update the global tick if necessary,
-		and call schedule()*/
-	/* when you manipulate thread list, disable interrupt */
+	intr_set_level(old_level);
 }
 
-void thread_wakeup(void) {
+void thread_wakeup(int64_t ticks) {
+	struct thread *sleep_thread;
 	enum intr_level old_level;
 	old_level = intr_disable();
-	// find_minimum_sleep_list();
-	int64_t global_tick = return_minimum(&sleep_list);
+
 	while (!list_empty(&sleep_list)) {
-		struct thread *next_ready;
-		// list_less_func *func_ptr = _list_less_func;
-		// next_ready = list_entry(list_front(&sleep_list), struct thread, elem);
-		next_ready = list_entry(list_min(&sleep_list, _list_less_func, global_tick), struct thread, elem);
-		if (next_ready->wakeup_tick <= global_tick) {
-			list_push_back(&ready_list, &(next_ready->elem));
-			next_ready->status = THREAD_READY;
-			list_remove(&(next_ready->elem));
-			global_tick = return_minimum(&sleep_list);
+		sleep_thread = list_entry(list_begin(&sleep_list), struct thread, elem);
+		
+		if (sleep_thread->wakeup_tick <= ticks){
+		list_remove(&(sleep_thread->elem)); //elem->next return
+		thread_unblock(sleep_thread);
 		} else {
-			break;
+		break;
 		}
-	}
-	intr_set_level (old_level);
+	} 
+	intr_set_level(old_level);
 }
