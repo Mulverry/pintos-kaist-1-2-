@@ -493,5 +493,11 @@ list_min (struct list *list, list_less_func *less, void *aux) {
 bool _list_less_func (const struct list_elem *a, const struct list_elem *b, void *aux) {
 	if (list_entry(a, struct thread, elem)->wakeup_tick < list_entry(b, struct thread, elem)->wakeup_tick)
 		return true;
+	else return false;
+}
+
+bool __list_less_func (const struct list_elem *a, const struct list_elem *b, void *aux) {
+	if (list_entry(a, struct thread, elem)->priority > list_entry(b, struct thread, elem)->priority)
+		return true;
     else return false;
 }
