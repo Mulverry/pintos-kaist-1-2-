@@ -29,7 +29,7 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 /* Thread_ready 상태인 프로세스의 리스트로 실행될 준비는 되었지만 실제로 실행되고 있지는 않음 */
-static struct list ready_list;
+struct list ready_list;
 
 static struct list sleep_list;
 
@@ -69,7 +69,7 @@ static void idle (void *aux UNUSED);
 static struct thread *next_thread_to_run (void);
 static void init_thread (struct thread *, const char *name, int priority);
 static void do_schedule(int status);
-static void schedule (void);
+void schedule (void);
 static tid_t allocate_tid (void);
 void thread_sleep(int64_t ticks);
 
@@ -151,7 +151,7 @@ thread_start (void) {
 	/* 유휴 스레드 생성 */
 	struct semaphore idle_started;
 	sema_init (&idle_started, 0);
-	thread_create ("idle", PRI_MIN, idle, &idle_started);
+	thread_create ("idle", PRI_DEFAULT, idle, &idle_started);
 
 	/* Start preemptive thread scheduling. */
 	/* 선점형 스레드 스케줄링을 시작 */
@@ -346,8 +346,8 @@ thread_yield (void) {
 	enum intr_level old_level;
 
 	ASSERT (!intr_context ());
-
 	old_level = intr_disable ();
+
 	if (curr != idle_thread)
 		// list_push_back (&ready_list, &curr->elem);
 		list_insert_ordered(&ready_list, &(curr->elem), __list_less_func, NULL);
@@ -358,16 +358,23 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+	// thread_current ()->priority= new_priority;
+	thread_current ()->old_priority= new_priority;
+
+	if (!list_empty(&thread_current()->donations)){
+	struct thread *max_thread = list_entry(list_front(&thread_current()->donations), struct thread, d_elem);
+		if (max_thread->priority > thread_current()->old_priority)
+			thread_current()->priority = max_thread->priority;
+		else thread_current()->priority = thread_current()->old_priority;
+	// }
+	} else {
+			thread_current()->priority = thread_current()->old_priority;
+	}
+
+
 	if (thread_current()->priority < list_entry(list_begin(&ready_list),struct thread, elem)->priority)
 	{
-		// enum intr_level old_level;
-		// old_level = intr_disable ();
-		// thread_current()->status = THREAD_READY;
-		// list_insert_ordered(&ready_list, &(thread_current()->elem), __list_less_func, NULL);
-		// schedule();
 		thread_yield();
-		// intr_set_level(old_level);
 	}
 }
 
@@ -465,7 +472,10 @@ init_thread (struct thread *t, const char *name, int priority) {
 	strlcpy (t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
+	t->old_priority = priority;
 	t->magic = THREAD_MAGIC;
+	t->wait_on_lock = NULL;
+	list_init(&t->donations);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
