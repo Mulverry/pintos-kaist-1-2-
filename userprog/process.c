@@ -1,4 +1,5 @@
 #include "userprog/process.h"
+#include <stdio.h>
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
@@ -22,8 +23,10 @@
 #include "vm/vm.h"
 #endif
 
+static bool setup_stack (struct intr_frame *if_);
 static void process_cleanup (void);
-static bool load (const char *file_name, struct intr_frame *if_);
+// static bool load (const char *file_name, struct intr_frame *if_);
+static bool load (const char *file_name, struct intr_frame *if_, char **argv, int argc);
 static void initd (void *f_name);
 static void __do_fork (void *);
 
@@ -42,7 +45,6 @@ tid_t
 process_create_initd (const char *file_name) {
 	char *fn_copy;
 	tid_t tid;
-
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
 	fn_copy = palloc_get_page (0);
@@ -50,8 +52,11 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
+	char *save_ptr;
+	strtok_r(fn_copy, " ", &save_ptr);
+
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	tid = thread_create (fn_copy, PRI_DEFAULT, initd, file_name);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	return tid;
@@ -66,8 +71,9 @@ initd (void *f_name) {
 
 	process_init ();
 
-	if (process_exec (f_name) < 0)
+	if (process_exec (f_name) < 0) {
 		PANIC("Fail to launch initd\n");
+	}
 	NOT_REACHED ();
 }
 
@@ -165,6 +171,7 @@ process_exec (void *f_name) {
 	char *file_name = f_name;
 	bool success;
 
+
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
 	 * it stores the execution information to the member. */
@@ -173,14 +180,33 @@ process_exec (void *f_name) {
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
+	
+	char *file_name_ = palloc_get_page(0);
+	if (file_name_ == NULL)
+		return -1;
+	strlcpy(file_name_, file_name, PGSIZE);
+
+	char *save_ptr;
+	char *argv[128];
+	int argc = 0;
+	for (argv[argc] = strtok_r(file_name_, " ", &save_ptr); argv[argc] != NULL; argv[argc] = strtok_r(NULL, " ", &save_ptr)) {
+		argc++;
+	}
+	// 스택에 저장
+
+	
 	/* We first kill the current context */
 	process_cleanup ();
 
+
 	/* And then load the binary */
-	success = load (file_name, &_if);
+
+	// success = load (fn_copy_, &_if);
+	success = load (file_name_, &_if, argv, argc);
 
 	/* If load failed, quit. */
-	palloc_free_page (file_name);
+
+	palloc_free_page (file_name_);
 	if (!success)
 		return -1;
 
@@ -188,7 +214,6 @@ process_exec (void *f_name) {
 	do_iret (&_if);
 	NOT_REACHED ();
 }
-
 
 /* Waits for thread TID to die and returns its exit status.  If
  * it was terminated by the kernel (i.e. killed due to an
@@ -199,11 +224,63 @@ process_exec (void *f_name) {
  *
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
+struct thread *get_child_thread(tid_t child_tid) {
+    struct thread *cur = thread_current();
+    struct list_elem *e;
+
+    for (e = list_begin(&cur->children); e != list_end(&cur->children); e = list_next(e)) {
+        struct thread *t = list_entry(e, struct thread, child_elem);
+        if (t->tid == child_tid) {
+            return t;
+        }
+    }
+
+    return NULL;
+}
+
+void remove_child_thread(struct thread *child) {
+    list_remove(&child->child_elem);
+}
+
 int
 process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	// 1. tid가 유효한지 확인
+	struct thread *cur = thread_current();
+	struct list_elem *e;
+	bool is_valid_tid = false;
+
+	for (e = list_begin(&cur->children); e != list_end(&cur->children); e = list_next(e)) {
+		struct thread *t = list_entry(e, struct thread, child_elem);
+		if (t->tid == child_tid) {
+			is_valid_tid = true;
+			break;
+		}
+	}
+
+	if (!is_valid_tid) {
+		return -1;
+	}
+    // 2. tid가 호출 프로세스의 자식인지 확인
+    // 3. process_wait 함수가 이미 성공적으로 호출된 tid인지 확인
+	if (cur->waited_tid == child_tid) return -1;
+
+	cur->waited_tid = child_tid;
+    // 위 조건들이 모두 충족되면 대기
+	struct thread *child = get_child_thread(child_tid);
+	if (child != NULL) {
+		sema_down(&child->exit_sema);
+		int exit_status = child->exit_status;
+		remove_child_thread(child);
+		return exit_status;
+	}
+    // tid가 종료될 때까지 대기
+
+    // tid가 종료되면 종료 상태 반환
+    // tid가 커널에 의해 종료되었다면 -1 반환
+
 	return -1;
 }
 
@@ -215,6 +292,8 @@ process_exit (void) {
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
+	sema_up(&curr->exit_sema);
+	curr->exit_status = curr->status;
 
 	process_cleanup ();
 }
@@ -310,7 +389,7 @@ struct ELF64_PHDR {
 #define ELF ELF64_hdr
 #define Phdr ELF64_PHDR
 
-static bool setup_stack (struct intr_frame *if_);
+
 static bool validate_segment (const struct Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		uint32_t read_bytes, uint32_t zero_bytes,
@@ -321,7 +400,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
  * and its initial stack pointer into *RSP.
  * Returns true if successful, false otherwise. */
 static bool
-load (const char *file_name, struct intr_frame *if_) {
+load (const char *file_name, struct intr_frame *if_, char **argv, int argc) {
 	struct thread *t = thread_current ();
 	struct ELF ehdr;
 	struct file *file = NULL;
@@ -329,7 +408,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	bool success = false;
 	int i;
 
-	/* Allocate and activate page directory. */
+		/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
 	if (t->pml4 == NULL)
 		goto done;
@@ -416,6 +495,43 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+	// 유저스택에 푸쉬
+
+	for (int i = argc - 1; i >= 0; i--) {
+                size_t arg_size = strlen(argv[i]) + 1;
+                if_->rsp -= arg_size;
+                memcpy(if_->rsp, argv[i], arg_size);
+				argv[i] = if_->rsp;
+            }
+
+ /* Word align */
+ 
+	if_->rsp -= (size_t)if_->rsp % 8;
+
+ /* Push null pointer sentinel */
+	if_->rsp -= sizeof(char *);
+	*(char **)if_->rsp = NULL;
+
+ /* Push argv */
+	for (i = argc - 1; i >= 0; i--) {
+		if_->rsp -= sizeof(char *);
+		memcpy(if_->rsp, &argv[i], sizeof(char *));
+	}
+
+	// push argv[0]
+	if_->R.rsi -= if_->rsp + sizeof(char *);
+
+//  /* Push argc */
+	// if_->R.rdi -= sizeof(int);
+	if_->R.rdi = argc;
+	
+	
+
+ /* Push fake return address */
+	if_->rsp -= sizeof(void *);
+	*(void **)if_->rsp = NULL;
+
+	hex_dump((uintptr_t) if_->rsp, if_->rsp, USER_STACK - (uintptr_t)if_->rsp, true);
 
 	success = true;
 
@@ -424,7 +540,6 @@ done:
 	file_close (file);
 	return success;
 }
-
 
 /* Checks whether PHDR describes a valid, loadable segment in
  * FILE and returns true if so, false otherwise. */
@@ -551,6 +666,23 @@ setup_stack (struct intr_frame *if_) {
 	return success;
 }
 
+
+// static bool
+// setup_stack (struct intr_frame *if_, const char *file_name) {
+// 	uint8_t *kpage;
+// 	bool success = false;
+
+// 	kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+// 	if (kpage != NULL) {
+// 		success = install_page (((uint8_t *) USER_STACK) - PGSIZE, kpage, true);
+// 		if (success)
+// 			if_->rsp = USER_STACK;
+// 		else
+// 			palloc_free_page (kpage);
+// 	}
+// 	return success;
+// }
+
 /* Adds a mapping from user virtual address UPAGE to kernel
  * virtual address KPAGE to the page table.
  * If WRITABLE is true, the user process may modify the page;
@@ -637,3 +769,17 @@ setup_stack (struct intr_frame *if_) {
 	return success;
 }
 #endif /* VM */
+
+// static void start_process (void *file_name) {
+
+// 	char *file_name_ = file_name;
+// 	struct intr_frame if_;
+// 	bool success;
+
+	
+// 	success = load(file_name_, &if_.rip, &if_.rsp);
+// 	if (!success) thread_exit();
+		
+// 	asm volatile ("movl %0, %%rsp; jmp intr_exit" : : "g" (&if_) : "memory");
+
+// }
