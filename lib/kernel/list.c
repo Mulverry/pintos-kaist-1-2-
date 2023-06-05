@@ -425,10 +425,12 @@ list_insert_ordered (struct list *list, struct list_elem *elem,
 	ASSERT (list != NULL);
 	ASSERT (elem != NULL);
 	ASSERT (less != NULL);
-
+	enum intr_level old_level;
+	old_level = intr_disable();
 	for (e = list_begin (list); e != list_end (list); e = list_next (e))
 		if (less (elem, e, aux))
 			break;
+	intr_set_level(old_level);
 	return list_insert (e, elem);
 }
 
@@ -490,14 +492,20 @@ list_min (struct list *list, list_less_func *less, void *aux) {
 	return min;
 }
 
-bool _list_less_func (const struct list_elem *a, const struct list_elem *b, void *aux) {
+bool _list_less_func (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
 	if (list_entry(a, struct thread, elem)->wakeup_tick < list_entry(b, struct thread, elem)->wakeup_tick)
 		return true;
 	else return false;
 }
 
-bool __list_less_func (const struct list_elem *a, const struct list_elem *b, void *aux) {
+bool __list_less_func (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
 	if (list_entry(a, struct thread, elem)->priority > list_entry(b, struct thread, elem)->priority)
+		return true;
+    else return false;
+}
+
+bool ___list_less_func (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+	if (list_entry(a, struct thread, d_elem)->priority > list_entry(b, struct thread, d_elem)->priority)
 		return true;
     else return false;
 }

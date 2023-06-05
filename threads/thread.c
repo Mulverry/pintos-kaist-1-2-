@@ -29,7 +29,7 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 /* Thread_ready 상태인 프로세스의 리스트로 실행될 준비는 되었지만 실제로 실행되고 있지는 않음 */
-struct list ready_list;
+static struct list ready_list;
 
 static struct list sleep_list;
 
@@ -69,7 +69,7 @@ static void idle (void *aux UNUSED);
 static struct thread *next_thread_to_run (void);
 static void init_thread (struct thread *, const char *name, int priority);
 static void do_schedule(int status);
-void schedule (void);
+static void schedule (void);
 static tid_t allocate_tid (void);
 void thread_sleep(int64_t ticks);
 
@@ -209,6 +209,7 @@ tid_t
 thread_create (const char *name, int priority,
 		thread_func *function, void *aux) {
 	struct thread *t, *c_t;
+	// struct kernel_thread_frame *kf;
 	tid_t tid;
 	ASSERT (function != NULL);
 
@@ -221,6 +222,8 @@ thread_create (const char *name, int priority,
 	init_thread (t, name, priority);
 	tid = t->tid = allocate_tid ();
 
+	list_push_back(&thread_current()->children, &t->child_elem);
+
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
 	t->tf.rip = (uintptr_t) kernel_thread;
@@ -231,12 +234,9 @@ thread_create (const char *name, int priority,
 	t->tf.ss = SEL_KDSEG;
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
-
+	
 	/* Add to run queue. */
-// 	thread_unblock (t);
-
-
-
+	// thread_unblock (t);
 
 	/* compare the priorities of the currently running thread and
 	the newly inserted one. yield the cpu if the newly arriving thread has
@@ -335,6 +335,8 @@ thread_exit (void) {
 	   We will be destroyed during the call to schedule_tail(). */
 	intr_disable ();
 	do_schedule (THREAD_DYING);
+	list_remove(&thread_current()->elem);
+	thread_current()->status = THREAD_DYING;
 	NOT_REACHED ();
 }
 
@@ -466,16 +468,21 @@ init_thread (struct thread *t, const char *name, int priority) {
 	ASSERT (t != NULL);
 	ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
 	ASSERT (name != NULL);
-
+	
 	memset (t, 0, sizeof *t);
 	t->status = THREAD_BLOCKED;
 	strlcpy (t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
+
 	t->priority = priority;
 	t->old_priority = priority;
 	t->magic = THREAD_MAGIC;
 	t->wait_on_lock = NULL;
 	list_init(&t->donations);
+	list_init(&t->children);
+	list_init(&t->waited_children);
+	sema_init(&t->exit_sema, 0);
+	t->exit_status = -1;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

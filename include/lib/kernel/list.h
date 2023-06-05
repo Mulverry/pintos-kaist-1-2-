@@ -83,12 +83,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+
 /* List element. */
 struct list_elem {
 	struct list_elem *prev;     /* Previous list element. */
 	struct list_elem *next;     /* Next list element. */
 };
 
+struct list_item {
+   struct list_elem elem;
+   char *str;
+};
 /* List. */
 struct list {
 	struct list_elem head;      /* List head. */
@@ -161,4 +166,5 @@ struct list_elem *list_max (struct list *, list_less_func *, void *aux);
 struct list_elem *list_min (struct list *, list_less_func *, void *aux);
 bool _list_less_func (const struct list_elem *a, const struct list_elem *b, void *aux);
 bool __list_less_func (const struct list_elem *a, const struct list_elem *b, void *aux);
+bool ___list_less_func (const struct list_elem *a, const struct list_elem *b, void *aux);
 #endif /* lib/kernel/list.h */

@@ -666,23 +666,6 @@ setup_stack (struct intr_frame *if_) {
 	return success;
 }
 
-
-// static bool
-// setup_stack (struct intr_frame *if_, const char *file_name) {
-// 	uint8_t *kpage;
-// 	bool success = false;
-
-// 	kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-// 	if (kpage != NULL) {
-// 		success = install_page (((uint8_t *) USER_STACK) - PGSIZE, kpage, true);
-// 		if (success)
-// 			if_->rsp = USER_STACK;
-// 		else
-// 			palloc_free_page (kpage);
-// 	}
-// 	return success;
-// }
-
 /* Adds a mapping from user virtual address UPAGE to kernel
  * virtual address KPAGE to the page table.
  * If WRITABLE is true, the user process may modify the page;

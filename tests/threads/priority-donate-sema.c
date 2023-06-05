@@ -11,7 +11,7 @@
    Written by Godmar Back <gback@cs.vt.edu>. */
 
 #include <stdio.h>
-#include "tests/threads/tests.h"
+#include "tests/threads/tests.h"k
 #include "threads/init.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
