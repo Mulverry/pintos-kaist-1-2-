@@ -171,7 +171,6 @@ process_exec (void *f_name) {
 	char *file_name = f_name;
 	bool success;
 
-
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
 	 * it stores the execution information to the member. */
@@ -180,7 +179,6 @@ process_exec (void *f_name) {
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
-	
 	char *file_name_ = palloc_get_page(0);
 	if (file_name_ == NULL)
 		return -1;
@@ -247,39 +245,7 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	// 1. tid가 유효한지 확인
-	struct thread *cur = thread_current();
-	struct list_elem *e;
-	bool is_valid_tid = false;
-
-	for (e = list_begin(&cur->children); e != list_end(&cur->children); e = list_next(e)) {
-		struct thread *t = list_entry(e, struct thread, child_elem);
-		if (t->tid == child_tid) {
-			is_valid_tid = true;
-			break;
-		}
-	}
-
-	if (!is_valid_tid) {
-		return -1;
-	}
-    // 2. tid가 호출 프로세스의 자식인지 확인
-    // 3. process_wait 함수가 이미 성공적으로 호출된 tid인지 확인
-	if (cur->waited_tid == child_tid) return -1;
-
-	cur->waited_tid = child_tid;
-    // 위 조건들이 모두 충족되면 대기
-	struct thread *child = get_child_thread(child_tid);
-	if (child != NULL) {
-		sema_down(&child->exit_sema);
-		int exit_status = child->exit_status;
-		remove_child_thread(child);
-		return exit_status;
-	}
-    // tid가 종료될 때까지 대기
-
-    // tid가 종료되면 종료 상태 반환
-    // tid가 커널에 의해 종료되었다면 -1 반환
+	for (int i = 0; i < 999999999; i++) {}
 
 	return -1;
 }
@@ -497,12 +463,12 @@ load (const char *file_name, struct intr_frame *if_, char **argv, int argc) {
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
 	// 유저스택에 푸쉬
 
-	for (int i = argc - 1; i >= 0; i--) {
-                size_t arg_size = strlen(argv[i]) + 1;
-                if_->rsp -= arg_size;
-                memcpy(if_->rsp, argv[i], arg_size);
-				argv[i] = if_->rsp;
-            }
+	for (int i = 0; i < argc; i++) {
+		size_t arg_size = strlen(argv[i]) + 1;
+		if_->rsp -= arg_size;
+		memcpy(if_->rsp, argv[i], arg_size);
+		argv[i] = if_->rsp;
+	}
 
  /* Word align */
  
@@ -513,25 +479,27 @@ load (const char *file_name, struct intr_frame *if_, char **argv, int argc) {
 	*(char **)if_->rsp = NULL;
 
  /* Push argv */
-	for (i = argc - 1; i >= 0; i--) {
+	for (i = argc; i >= -1; i--) {
 		if_->rsp -= sizeof(char *);
 		memcpy(if_->rsp, &argv[i], sizeof(char *));
 	}
 
-	// push argv[0]
-	if_->R.rsi -= if_->rsp + sizeof(char *);
 
-//  /* Push argc */
-	// if_->R.rdi -= sizeof(int);
+	// push argv[0]
+	if_->R.rsi = if_->rsp + sizeof(char *);
+
+
+ /* Push argc */
 	if_->R.rdi = argc;
+
 	
 	
 
  /* Push fake return address */
-	if_->rsp -= sizeof(void *);
+
 	*(void **)if_->rsp = NULL;
 
-	hex_dump((uintptr_t) if_->rsp, if_->rsp, USER_STACK - (uintptr_t)if_->rsp, true);
+	// hex_dump((uintptr_t) if_->rsp, if_->rsp, USER_STACK - (uintptr_t)if_->rsp, true);
 
 	success = true;
 
@@ -752,17 +720,3 @@ setup_stack (struct intr_frame *if_) {
 	return success;
 }
 #endif /* VM */
-
-// static void start_process (void *file_name) {
-
-// 	char *file_name_ = file_name;
-// 	struct intr_frame if_;
-// 	bool success;
-
-	
-// 	success = load(file_name_, &if_.rip, &if_.rsp);
-// 	if (!success) thread_exit();
-		
-// 	asm volatile ("movl %0, %%rsp; jmp intr_exit" : : "g" (&if_) : "memory");
-
-// }

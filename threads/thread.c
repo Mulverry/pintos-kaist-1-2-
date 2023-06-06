@@ -11,6 +11,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "userprog/syscall.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -212,7 +213,6 @@ thread_create (const char *name, int priority,
 	// struct kernel_thread_frame *kf;
 	tid_t tid;
 	ASSERT (function != NULL);
-
 	/* Allocate thread. */
 	t = palloc_get_page (PAL_ZERO);
 	if (t == NULL)
@@ -222,7 +222,17 @@ thread_create (const char *name, int priority,
 	init_thread (t, name, priority);
 	tid = t->tid = allocate_tid ();
 
-	list_push_back(&thread_current()->children, &t->child_elem);
+
+	struct file_descriptor *fd1 = palloc_get_page(0);
+	
+	fd1->fd = 1;
+	list_push_front(&thread_current()->file_descriptors, &fd1->elem);
+
+	struct file_descriptor *fd0 = palloc_get_page(0);
+	
+	fd0->fd = 0;
+	list_push_front(&thread_current()->file_descriptors, &fd0->elem);
+	// list_push_back(&thread_current()->children, &t->child_elem);
 
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
@@ -235,6 +245,7 @@ thread_create (const char *name, int priority,
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
 	
+
 	/* Add to run queue. */
 	// thread_unblock (t);
 
@@ -479,6 +490,7 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->magic = THREAD_MAGIC;
 	t->wait_on_lock = NULL;
 	list_init(&t->donations);
+	list_init(&t->file_descriptors);
 	list_init(&t->children);
 	list_init(&t->waited_children);
 	sema_init(&t->exit_sema, 0);

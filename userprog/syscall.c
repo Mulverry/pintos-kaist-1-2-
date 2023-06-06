@@ -9,7 +9,15 @@
 #include "intrinsic.h"
 #include "threads/init.h"
 #include <string.h>
+#include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "threads/palloc.h"
+#include "lib/kernel/stdio.h"
 
+
+
+static struct file_descriptor *find_file_descriptor (int fd);
+static int allocate_fd (void);
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -45,16 +53,17 @@ syscall_init (void) {
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
-	// TODO: Your implementation goes here.
-	int *call_number;
-	call_number = f->R.rax;
-	switch (*call_number) {
+	//TODO: Your implementation goes here.
+	struct file_descriptor *file_desc;
+
+
+	switch (f->R.rax) {
 		case SYS_HALT:
 			halt();
 			break;
-	// 	case SYS_EXIT:
-	// 		exit();
-			// break;
+		case SYS_EXIT:
+			exit(f->R.rdi);
+			break;
 	// 	case SYS_FORK:
 	// 		fork(thread_name());
 			// break;
@@ -64,58 +73,53 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	// 	case SYS_WAIT:
 	// 		wait();
 			// break;
-			/// 연주
-
 	// 	case SYS_CREATE:
 	// 		create();
 			// break;
 	// 	case SYS_REMOVE:
 	// 		remove();
 			// break;
-	// 	case SYS_OPEN:
-	// 		open();
-			// break;
-	// 	case SYS_FILESIZE:
-	// 		filesize();
-			// break;
-			// 승규
-
-	// 	case SYS_READ:
-	// 		read();
-			// break;
-	// 	case SYS_WRITE:
-	// 		write();
-			// break;
-	// 	case SYS_SEEK:
-	// 		seek();
-			// break;
-	// 	case SYS_TELL:
-	// 		tell();
-			// break;
-	// 	case SYS_CLOSE:
-	// 		close();
-			// break;
-			// 희령
+		case SYS_OPEN:
+			file_desc->fd = open(f->R.rdi);
+			f->R.rax = file_desc->fd;
+			palloc_free_page(file_desc);
+			break;
+	// // 	case SYS_FILESIZE:
+	// // 		filesize();
+	// 		// break;
+		case SYS_READ:
+			f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
+			break;
+		case SYS_WRITE:
+			f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
+			break;
+		// case SYS_SEEK:
+		// 	f->R.rax = seek(f->R.rdi, f->R.rsi);
+		// 	break;
+		// case SYS_TELL:
+		// 	f->R.rax = tell(f->R.rdi);
+		// 	break;
+		case SYS_CLOSE:
+			close(f->R.rdi);
+			break;
+		default:
+			thread_exit();
 	}
 
-
-	printf ("system call!\n");
-	thread_exit ();
 }
+
 
 void halt (void) {
 	power_off();
 }
 
-// void exit (int status) {
-// 	// Terminates the current user program, returning status to the kernel. 
-// 	// If the process's parent waits for it (see below), this is the status that will be returned. 
-// 	// Conventionally, a status of 0 indicates success and nonzero values indicate errors.
-// 	printf("%s: exit(%s)", process_name, status);
-// 	thread_exit();
-		
-// 	return 0;
-// }
+void exit (int status) {
+	// Terminates the current user program, returning status to the kernel. 
+	// If the process's parent waits for it (see below), this is the status that will be returned. 
+	// Conventionally, a status of 0 indicates success and nonzero values indicate errors.
+	printf("%s: exit(%d)\n", thread_name(), status);
+	thread_exit();
+}
 
 // pid_t fork (const char *thread_name){
 // // 	Create new process which is the clone of current process with the name THREAD_NAME. 
@@ -153,7 +157,7 @@ void halt (void) {
 // 	wait(pid) must return -1. it tis perfectly legal for a parent process to wait for child processes that have already terminated by the time the parent calls wait, 
 // 	but the kernel must still allow the parent to retrieve its child's exit status, or learn that the child was terminated by the kernel.
 	
-// 	wiat must fail and return -1 immediately if any of the following conditions is true:
+// 	wait must fail and return -1 immediately if any of the following conditions is true:
 // 	- pid does not refer to a direct child of the calling process. pid is a direct child of the calling process if and only if the calling process received pid as a return value
 // 	from a successful call to fork. note that children are not inherited: if a spawns child b and b spawns child process c,
 // 	then a cannot wait for c, even if b is dead. a call to wait(c) by process a must fail. similarly, orphaned processes are not assigned to a new parent if their parent process exists before they do.
@@ -161,28 +165,91 @@ void halt (void) {
 // };
 bool create (const char *file, unsigned initial_size) {
 
-};
+}
 bool remove (const char *file) {
 
-};
+}
+
 int open (const char *file) {
 
-};
+ struct file *file_ = filesys_open(file);
+ if (file_ == NULL) {
+ return -1;
+ }
+
+ struct file_descriptor *file_desc = palloc_get_page(0);
+
+ file_desc->fd = allocate_fd();
+ file_desc->file = file_;
+
+ list_push_back(&thread_current()->file_descriptors, &file_desc->elem);
+
+ return file_desc->fd;
+}
+
+	
 int filesize (int fd) {
 
-};
-int read (int fd, void *buffer, unsigned size) {
+}
 
-};
+int read (int fd, void *buffer, unsigned size) {
+if (fd == 0) return input_getc();
+
+struct file *file_ = find_file_descriptor(fd);
+if (file_ == NULL)	return -1;
+// else return file_read(file_->file, buffer, size);
+}
+
 int write (int fd, const void *buffer, unsigned size) {
 
-};
-void seek (int fd, unsigned position) {
-
-};
-unsigned tell (int fd) {
-
-};
-void close (int fd) {
+	struct file_descriptor *file_desc = find_file_descriptor(fd);
 	
-};
+	if (fd == 1) {
+		putbuf(buffer, size);
+		
+	} else { 
+		if (!file_desc) {
+			return -1;
+		}
+		return file_write(file_desc->file, buffer, size);
+	}
+}
+
+
+// void seek (int fd, unsigned position) {
+
+// }
+
+// unsigned tell (int fd) {
+// // return the position of the next byte to be read or written in open file fd
+// }
+
+
+void close (int fd) {
+	struct file *file = find_file_descriptor(fd);
+	file_close(file);
+}
+
+
+struct file_descriptor *find_file_descriptor (int fd) {
+ struct thread *cur = thread_current();
+ struct list_elem *e;
+ for (e = list_begin(&cur->file_descriptors); e != list_end(&cur->file_descriptors); e = list_next(e)) {
+ struct file_descriptor *file_desc = list_entry(e, struct file_descriptor, elem);
+ if (file_desc->fd == fd) {
+ 	return file_desc;
+ 	}
+ }
+ return NULL;
+}
+
+int allocate_fd (void) {
+ struct thread *cur = thread_current();
+ int fd = 2;
+ while (true) {
+ if (find_file_descriptor(fd) == NULL) {
+ return fd;
+ }
+ fd++;
+ }
+}
