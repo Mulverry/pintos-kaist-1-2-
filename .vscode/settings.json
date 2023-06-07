@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        "init.h": "c",
+        "string.h": "c",
+        "filesys.h": "c",
+        "file.h": "c",
+        "FILE.H": "cpp",
+        "random.h": "c",
+        "syscall.h": "c"
+    }
+}

@@ -11,6 +11,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "userprog/syscall.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -206,8 +207,7 @@ thread_print_stats (void) {
    PRIORITY, but no actual priority scheduling is implemented.
    Priority scheduling is the goal of Problem 1-3. */
 tid_t
-thread_create (const char *name, int priority,
-		thread_func *function, void *aux) {
+thread_create (const char *name, int priority, thread_func *function, void *aux) {
 	struct thread *t, *c_t;
 	// struct kernel_thread_frame *kf;
 	tid_t tid;
@@ -222,7 +222,14 @@ thread_create (const char *name, int priority,
 	init_thread (t, name, priority);
 	tid = t->tid = allocate_tid ();
 
-	list_push_back(&thread_current()->children, &t->child_elem);
+	// list_push_back(&thread_current()->children, &t->child_elem);
+	struct file_descriptor *fd1 = palloc_get_page(0);
+	fd1->fd = 1;
+	list_push_front(&thread_current()->file_descriptors, &fd1->elem);
+
+	struct file_descriptor *fd0 = palloc_get_page(0);
+	fd0->fd = 0;
+	list_push_front(&thread_current()->file_descriptors, &fd0->elem);
 
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
@@ -360,7 +367,6 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	// thread_current ()->priority= new_priority;
 	thread_current ()->old_priority= new_priority;
 
 	if (!list_empty(&thread_current()->donations)){
@@ -368,7 +374,6 @@ thread_set_priority (int new_priority) {
 		if (max_thread->priority > thread_current()->old_priority)
 			thread_current()->priority = max_thread->priority;
 		else thread_current()->priority = thread_current()->old_priority;
-	// }
 	} else {
 			thread_current()->priority = thread_current()->old_priority;
 	}
@@ -482,6 +487,8 @@ init_thread (struct thread *t, const char *name, int priority) {
 	list_init(&t->children);
 	list_init(&t->waited_children);
 	sema_init(&t->exit_sema, 0);
+	list_init(&t->file_descriptors);
+
 	t->exit_status = -1;
 }
 
@@ -692,4 +699,18 @@ void thread_wakeup(int64_t ticks) {
 		}
 	} 
 	intr_set_level(old_level);
+}
+
+/** 자식 리스트를 검색하여 부모의 pid와 일치하는 스레드 리턴
+ * => 특정 프로세스 id에 대응하는 자식스레드를 찾아 해당 자식프로세스를 식별하고 상호작용*/
+struct thread *get_child_process(int pid){
+	struct thread *c_t = thread_current();
+	struct list child_list = c_t->children;
+	for (struct list_elem *i = list_begin(&child_list); i != list_end(&child_list); i = list_next(i)){
+		struct thread *t = list_entry(i, struct thread, child_elem);
+		if (t->tid == pid){
+			return t;
+		}
+	}
+	return NULL;
 }

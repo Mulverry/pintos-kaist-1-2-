@@ -1,6 +1,5 @@
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
-
 #include "threads/synch.h"
 #include <debug.h>
 #include <list.h>
@@ -86,6 +85,12 @@ typedef int tid_t;
  * only because they are mutually exclusive: only a thread in the
  * ready state is on the run queue, whereas only a thread in the
  * blocked state is on a semaphore wait list. */
+struct file_descriptor {
+	int fd;
+	struct file *file;
+	struct list_elem elem;
+};
+
 struct thread {
 	/* Owned by thread.c. */
 	tid_t tid;                          /* Thread identifier. */
@@ -94,22 +99,27 @@ struct thread {
 	int priority;                       /* Priority. */
 	int old_priority;
 	int64_t wakeup_tick;
+	
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 	struct list donations;
 	struct list_elem d_elem;
 	struct lock *wait_on_lock;
+	struct list file_descriptors;
 
+	struct intr_frame parent_if;
 	struct list children;
 	struct list_elem child_elem;
 	struct list waited_children;
 	tid_t waited_tid;
 	struct semaphore exit_sema;
 	int exit_status;
-#ifdef USERPROG
-	/* Owned by userprog/process.c. */
+
+// #ifdef USERPROG
+// 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
-#endif
+// #endif
+
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */
 	struct supplemental_page_table spt;
@@ -125,7 +135,6 @@ struct thread {
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
 
-static struct list ready_list;
 void thread_init (void);
 void thread_start (void);
 

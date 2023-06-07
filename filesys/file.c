@@ -36,12 +36,12 @@ file_reopen (struct file *file) {
 }
 
 /* Duplicate the file object including attributes and returns a new file for the
- * same inode as FILE. Returns a null pointer if unsuccessful. */
-struct file *
-file_duplicate (struct file *file) {
-	struct file *nfile = file_open (inode_reopen (file->inode));
-	if (nfile) {
-		nfile->pos = file->pos;
+ * same inode as FILE. Returns a null pointer if unsuccessful.
+ 주어진 파일 객체를 복제하여 동일한 파일을 다루는 새로운 파일 객체를 생성 */
+struct file * file_duplicate (struct file *file) {
+	struct file *nfile = file_open (inode_reopen (file->inode)); // file_open 함수를 사용하여 주어진 파일 객체의 inode를 재오픈한 새로운 파일 객체 nfile을 생성
+	if (nfile) { // 새로운 파일 객체 nfile이 성공적으로 생성되었다면
+		nfile->pos = file->pos; // 원본 파일 객체의 현재 위치를 nfile의 위치로 복사
 		if (file->deny_write)
 			file_deny_write (nfile);
 	}
@@ -93,8 +93,7 @@ file_read_at (struct file *file, void *buffer, off_t size, off_t file_ofs) {
  * (Normally we'd grow the file in that case, but file growth is
  * not yet implemented.)
  * Advances FILE's position by the number of bytes read. */
-off_t
-file_write (struct file *file, const void *buffer, off_t size) {
+off_t file_write (struct file *file, const void *buffer, off_t size) {
 	off_t bytes_written = inode_write_at (file->inode, buffer, size, file->pos);
 	file->pos += bytes_written;
 	return bytes_written;

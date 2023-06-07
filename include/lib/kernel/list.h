@@ -94,6 +94,7 @@ struct list_item {
    struct list_elem elem;
    char *str;
 };
+
 /* List. */
 struct list {
 	struct list_elem head;      /* List head. */
