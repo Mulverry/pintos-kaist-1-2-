@@ -13,11 +13,23 @@
 #include "filesys/file.h"
 #include "threads/palloc.h"
 #include "lib/kernel/stdio.h"
+#include "userprog/process.h"
 
 
 
 static struct file_descriptor *find_file_descriptor (int fd);
 static int allocate_fd (void);
+
+void halt (void);
+void exit (int status);
+bool create (const char *file, unsigned initial_size);
+bool remove (const char *file);
+int open (const char *file);
+int filesize (int fd);
+int read (int fd, void *buffer, unsigned size);
+int write (int fd, const void *buffer, unsigned size);
+void seek (int fd, unsigned position);
+unsigned tell (int fd);
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -54,7 +66,6 @@ syscall_init (void) {
 void
 syscall_handler (struct intr_frame *f UNUSED) {
 	//TODO: Your implementation goes here.
-	struct file_descriptor *file_desc;
 
 
 	switch (f->R.rax) {
@@ -67,38 +78,36 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	// 	case SYS_FORK:
 	// 		fork(thread_name());
 			// break;
-	// 	case SYS_EXEC:
-	// 		exec();
-			// break;
+		case SYS_EXEC:
+			f->R.rax = exec(f->R.rdi);
+			break;
 	// 	case SYS_WAIT:
 	// 		wait();
 			// break;
-	// 	case SYS_CREATE:
-	// 		create();
-			// break;
-	// 	case SYS_REMOVE:
-	// 		remove();
-			// break;
-		case SYS_OPEN:
-			file_desc->fd = open(f->R.rdi);
-			f->R.rax = file_desc->fd;
-			palloc_free_page(file_desc);
+		case SYS_CREATE:
+			f->R.rax = create(f->R.rdi, f->R.rsi);
 			break;
-	// // 	case SYS_FILESIZE:
-	// // 		filesize();
-	// 		// break;
+		case SYS_REMOVE:
+			f->R.rax = remove(f->R.rdi);
+			break;
+		case SYS_OPEN:
+			f->R.rax = open(f->R.rdi);
+			break;
+		case SYS_FILESIZE:
+			f->R.rax = filesize(f->R.rdi);
+			break;
 		case SYS_READ:
 			f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
 			break;
 		case SYS_WRITE:
 			f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
 			break;
-		// case SYS_SEEK:
-		// 	f->R.rax = seek(f->R.rdi, f->R.rsi);
-		// 	break;
-		// case SYS_TELL:
-		// 	f->R.rax = tell(f->R.rdi);
-		// 	break;
+		case SYS_SEEK:
+			seek(f->R.rdi, f->R.rsi);
+			break;
+		case SYS_TELL:
+			f->R.rax = tell(f->R.rdi);
+			break;
 		case SYS_CLOSE:
 			close(f->R.rdi);
 			break;
@@ -131,23 +140,12 @@ void exit (int status) {
 
 // // The template utilizes the pml4_for_each() in threads/mmu.c to copy entire user memory space, including corresponding pagetable structures, 
 // // but you need to fill missing parts of passed pte_for_each_func (See virtual address).
+
 // }
 
-// int exec (const char *cmd_line) {
-// 	struct list args_list;
-// 	list_init(&args_list);
-	
-// 	char *ptr;
-// 	char *line = strtok_r(cmd_line, " ", &ptr);
-// 	while (line != NULL) {
-// 		struct list_item *new_item = malloc(sizeof(struct list_item));
-// 		new_item->str = line;
-// 		list_push_back(&args_list, &new_item->elem);
-// 		line = strtok_r(NULL, " ", &ptr);
-// 	}
-
-	
-// }
+int exec (const char *cmd_line) {
+	return process_exec(cmd_line);
+}
 
 
 
@@ -163,47 +161,64 @@ void exit (int status) {
 // 	then a cannot wait for c, even if b is dead. a call to wait(c) by process a must fail. similarly, orphaned processes are not assigned to a new parent if their parent process exists before they do.
 // 	- the process that calls wait has already called wait on pid. that is, a process may wait for any given child at most once.*/
 // };
-bool create (const char *file, unsigned initial_size) {
 
+bool create (const char *file, unsigned initial_size) {
+	if (file == "NULL" | file == NULL) exit(-1);
+	else	return filesys_create(file, initial_size);
 }
 bool remove (const char *file) {
 
+	return filesys_remove(file);
 }
-
 int open (const char *file) {
+	if (file == NULL) return -1;
+	struct file *file_ = filesys_open(file);
+	if (file_ == NULL) {
+	return -1;
+	}
 
- struct file *file_ = filesys_open(file);
- if (file_ == NULL) {
- return -1;
- }
+	struct file_descriptor *file_desc = palloc_get_page(0);
 
- struct file_descriptor *file_desc = palloc_get_page(0);
+	file_desc->fd = allocate_fd();
+	file_desc->file = file_;
 
- file_desc->fd = allocate_fd();
- file_desc->file = file_;
+	list_push_back(&thread_current()->file_descriptors, &file_desc->elem);
 
- list_push_back(&thread_current()->file_descriptors, &file_desc->elem);
-
- return file_desc->fd;
+	if (file_desc->fd >= 0) return file_desc->fd;
+	else return -1;
 }
 
-	
 int filesize (int fd) {
-
+	struct file_descriptor *file_desc = find_file_descriptor(fd);
+	file_length(file_desc->file);
 }
+	
 
 int read (int fd, void *buffer, unsigned size) {
-if (fd == 0) return input_getc();
+	if (!fd) return -1;
+	if (fd == 0) 
+	{
+		unsigned i;
+		for (i = 0; i < size; i++)
+		{
+			*(uint8_t *)(buffer + i) = input_getc();
+		}
+		return size;
+	}
+	
+		
 
-struct file *file_ = find_file_descriptor(fd);
-if (file_ == NULL)	return -1;
-// else return file_read(file_->file, buffer, size);
+	struct file_descriptor *file_ = find_file_descriptor(fd);
+
+	if (file_ == NULL)	return -1;
+	else return file_read(file_->file, buffer, size);
+
 }
 
 int write (int fd, const void *buffer, unsigned size) {
 
 	struct file_descriptor *file_desc = find_file_descriptor(fd);
-	
+
 	if (fd == 1) {
 		putbuf(buffer, size);
 		
@@ -216,40 +231,46 @@ int write (int fd, const void *buffer, unsigned size) {
 }
 
 
-// void seek (int fd, unsigned position) {
+void seek (int fd, unsigned position) {
+	struct file_descriptor *file_desc = find_file_descriptor(fd);
+	file_seek(file_desc->file, position);
+}
+unsigned tell (int fd) {
 
-// }
-
-// unsigned tell (int fd) {
-// // return the position of the next byte to be read or written in open file fd
-// }
+	struct file_descriptor *file_desc = find_file_descriptor(fd);
+	return file_tell(file_desc->file);
+}
 
 
 void close (int fd) {
-	struct file *file = find_file_descriptor(fd);
-	file_close(file);
+	if (!fd || fd > 64) return -1;
+	struct file_descriptor *file_desc = find_file_descriptor(fd);
+    if (file_desc != NULL) {
+        file_close(file_desc->file);
+        list_remove(&file_desc->elem);
+        palloc_free_page(file_desc);
+    }
+
 }
 
 
 struct file_descriptor *find_file_descriptor (int fd) {
- struct thread *cur = thread_current();
- struct list_elem *e;
- for (e = list_begin(&cur->file_descriptors); e != list_end(&cur->file_descriptors); e = list_next(e)) {
- struct file_descriptor *file_desc = list_entry(e, struct file_descriptor, elem);
- if (file_desc->fd == fd) {
- 	return file_desc;
- 	}
- }
- return NULL;
+	struct thread *cur = thread_current();
+	struct list_elem *e;
+	for (e = list_begin(&cur->file_descriptors); e != list_end(&cur->file_descriptors); e = list_next(e)) {
+		struct file_descriptor *file_desc = list_entry(e, struct file_descriptor, elem);
+		if (file_desc->fd == fd) {
+			return file_desc;
+			}
+	}
+	return NULL;
 }
 
 int allocate_fd (void) {
- struct thread *cur = thread_current();
- int fd = 2;
- while (true) {
- if (find_file_descriptor(fd) == NULL) {
- return fd;
- }
- fd++;
- }
+	struct thread *cur = thread_current();
+	int fd = 2;
+	while (true) {
+		if (find_file_descriptor(fd) == NULL) return fd;
+		fd++;
+	}
 }
