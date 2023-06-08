@@ -36,6 +36,29 @@ static void
 process_init (void) {
 	struct thread *current = thread_current ();
 }
+#include "vm/vm.h"^M
+#endif^M
+^M
+static bool setup_stack (struct intr_frame *if_);^M
+static void process_cleanup (void);^M
+// static bool load (const char *file_name, struct intr_frame *if_);^M
+static bool load (const char *file_name, struct intr_frame *if_, char **argv, int argc);^M
+static void initd (void *f_name);^M
+static void __do_fork (void *);^M
+^M
+/* General process initializer for initd and other process. */^M
+static void^M
+process_init (void) {^M
+        struct thread *current = thread_current ();^M
+}^M
+^M
+/* Starts the first userland program, called "initd", loaded from FILE_NAME.^M
+ * The new thread may be scheduled (and may even exit)^M
+ * before process_create_initd() returns. Returns the initd's^M
+ * thread id, or TID_ERROR if the thread cannot be created.^M
+ * Notice that THIS SHOULD BE CALLED ONCE. */^M
+tid_t^M
+                                                              39,1           1%
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
  * The new thread may be scheduled (and may even exit)
@@ -1551,4 +1574,7 @@ setup_stack (struct intr_frame *if_) {
 	return success;
 }
 #endif /* VM */
+<<<<<<< HEAD
+>>>>>>> f0bf602606fbae06622f8a813b8f72c5c95965f0
+=======
 >>>>>>> f0bf602606fbae06622f8a813b8f72c5c95965f0

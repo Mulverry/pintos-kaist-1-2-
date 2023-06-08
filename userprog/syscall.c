@@ -553,5 +553,8 @@ int allocate_fd (void) {
 		if (find_file_descriptor(fd) == NULL) return fd;
 		fd++;
 	}
+<<<<<<< HEAD
+>>>>>>> f0bf602606fbae06622f8a813b8f72c5c95965f0
+=======
 >>>>>>> f0bf602606fbae06622f8a813b8f72c5c95965f0
 }
