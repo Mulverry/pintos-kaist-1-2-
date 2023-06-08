@@ -131,6 +131,28 @@ static bool duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	bool writable;
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
+        return pid;^M
+}^M
+^M
+#ifndef VM^M
+/* Duplicate the parent's address space by passing this function to the^M
+ * pml4_for_each. This is only for the project 2. ^M
+ 부모 스레드의 페이지 테이블 엔트리를 복제하여 자식 스레드의 페이지 테이블에 추>가*/^M
+static bool duplicate_pte (uint64_t *pte, void *va, void *aux) {^M
+        struct thread *current = thread_current ();^M
+        struct thread *parent = (struct thread *) aux;^M
+        void *parent_page;^M
+        void *newpage;^M
+        bool writable;^M
+^M
+        /* 1. TODO: If the parent_page is kernel page, then return immediately. */^M
+        if is_kernel_vaddr(va)^M
+                return false;^M
+^M
+        /* 2. Resolve VA from the parent's page map level 4. */^M
+        parent_page = pml4_get_page (parent->pml4, va);^M
+        if (parent_page == NULL){^M
+                                                              134,1-8        7%
 	if is_kernel_vaddr(va)
 		return false;
 

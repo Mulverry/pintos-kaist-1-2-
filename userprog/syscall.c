@@ -1,4 +1,28 @@
 <<<<<<< HEAD
+#include "userprog/syscall.h"^M
+#include <stdio.h>^M
+#include <syscall-nr.h>^M
+#include "threads/interrupt.h"^M
+#include "threads/thread.h"^M
+#include "threads/loader.h"^M
+#include "userprog/gdt.h"^M
+#include "threads/flags.h"^M
+#include "intrinsic.h"^M
+#include "threads/init.h"^M
+#include <string.h>^M
+#include "filesys/filesys.h"^M
+#include "filesys/file.h"^M
+#include "threads/palloc.h"^M
+#include "lib/kernel/stdio.h"^M
+#include "userprog/process.h"^M
+^M
+^M
+static struct file_descriptor *find_file_descriptor(int fd);^M
+static int allocate_fd(void);^M
+^M
+void halt(void);^M
+"userprog/syscall.c" [noeol] 560L, 17332C                     1,1           Top
+<<<<<<< HEAD
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
