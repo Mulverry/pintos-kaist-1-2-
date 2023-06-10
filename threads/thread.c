@@ -207,10 +207,8 @@ thread_print_stats (void) {
    PRIORITY, but no actual priority scheduling is implemented.
    Priority scheduling is the goal of Problem 1-3. */
 tid_t
-thread_create (const char *name, int priority,
-		thread_func *function, void *aux) {
+thread_create (const char *name, int priority, thread_func *function, void *aux) {
 	struct thread *t, *c_t;
-	// struct kernel_thread_frame *kf;
 	tid_t tid;
 	ASSERT (function != NULL);
 	/* Allocate thread. */
@@ -222,23 +220,26 @@ thread_create (const char *name, int priority,
 	init_thread (t, name, priority);
 	tid = t->tid = allocate_tid ();
 
+	struct file **new_fdt = (struct file **)palloc_get_page(PAL_ZERO);
+	t->file_descriptors_table = new_fdt;
 
-	struct file_descriptor *fd1 = palloc_get_page(0);
-	
-	fd1->fd = 1;
-	list_push_front(&thread_current()->file_descriptors, &fd1->elem);
 
-	struct file_descriptor *fd0 = palloc_get_page(0);
+	// struct file_descriptor *fd1 = palloc_get_page(0);
 	
-	fd0->fd = 0;
-	list_push_front(&thread_current()->file_descriptors, &fd0->elem);
+	// fd1->fd = 1;
+	// list_push_front(&thread_current()->file_descriptors, &fd1->elem);
+
+	// struct file_descriptor *fd0 = palloc_get_page(0);
+	
+	// fd0->fd = 0;
+	// list_push_front(&thread_current()->file_descriptors, &fd0->elem);
 	// list_push_back(&thread_current()->children, &t->child_elem);
 
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
-	t->tf.rip = (uintptr_t) kernel_thread;
-	t->tf.R.rdi = (uint64_t) function;
-	t->tf.R.rsi = (uint64_t) aux;
+	t->tf.rip = (uintptr_t) kernel_thread; //커널스택 할당
+	t->tf.R.rdi = (uint64_t) function; // 스레드가 수행할 함수
+	t->tf.R.rsi = (uint64_t) aux; // 수행할 함수의 인자
 	t->tf.ds = SEL_KDSEG;
 	t->tf.es = SEL_KDSEG;
 	t->tf.ss = SEL_KDSEG;
@@ -256,6 +257,9 @@ thread_create (const char *name, int priority,
 	old_level = intr_disable();
 	t->status = THREAD_READY;
 	list_insert_ordered(&ready_list, &(t->elem), __list_less_func, NULL);
+	
+	list_push_back(&thread_current()->child_list, &t->child_elem);
+
 	c_t = thread_current();
 	if (t->priority > c_t->priority) {
 		c_t->status = THREAD_READY;
@@ -269,7 +273,7 @@ thread_create (const char *name, int priority,
 /* Puts the current thread to sleep.  It will not be scheduled
    again until awoken by thread_unblock().
 
-   This function must be called with interrupts turned off.  It
+   This function must be called with interrupts turned off.  Itx
    is usually a better idea to use one of the synchronization
    primitives in synch.h. */
 void
@@ -490,9 +494,10 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->magic = THREAD_MAGIC;
 	t->wait_on_lock = NULL;
 	list_init(&t->donations);
-	list_init(&t->file_descriptors);
-	list_init(&t->children);
+	// thread_init(&t->file_descriptors_table);
+	list_init(&t->child_list);
 	list_init(&t->waited_children);
+	sema_init(&t->fork_sema, 0);
 	sema_init(&t->exit_sema, 0);
 	t->exit_status = -1;
 }

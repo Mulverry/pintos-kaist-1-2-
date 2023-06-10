@@ -14,12 +14,14 @@
 #include "threads/palloc.h"
 #include "lib/kernel/stdio.h"
 #include "userprog/process.h"
+#include "lib/string.h"
 
 
 
 static struct file_descriptor *find_file_descriptor (int fd);
-static int allocate_fd (void);
+// static int allocate_fd (void);
 
+void check_address(void *addr);
 void halt (void);
 void exit (int status);
 bool create (const char *file, unsigned initial_size);
@@ -75,15 +77,15 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_EXIT:
 			exit(f->R.rdi);
 			break;
-	// 	case SYS_FORK:
-	// 		fork(thread_name());
-			// break;
+		case SYS_FORK:
+			f->R.rax = fork(f->R.rdi, f);
+			break;
 		case SYS_EXEC:
 			f->R.rax = exec(f->R.rdi);
 			break;
-	// 	case SYS_WAIT:
-	// 		wait();
-			// break;
+		case SYS_WAIT:
+			f->R.rax = wait(f->R.rdi);
+			break;
 		case SYS_CREATE:
 			f->R.rax = create(f->R.rdi, f->R.rsi);
 			break;
@@ -117,6 +119,12 @@ syscall_handler (struct intr_frame *f UNUSED) {
 
 }
 
+void check_address(void *addr){
+	struct thread *current = thread_current();
+	if (!is_user_vaddr(addr) || addr == NULL || pml4_get_page(current->pml4, addr)) {
+		exit(-1);
+	}
+}
 
 void halt (void) {
 	power_off();
@@ -130,24 +138,32 @@ void exit (int status) {
 	thread_exit();
 }
 
-// pid_t fork (const char *thread_name){
-// // 	Create new process which is the clone of current process with the name THREAD_NAME. 
-// // 	You don't need to clone the value of the registers except %RBX, %RSP, %RBP, and %R12 - %R15, which are callee-saved registers. 
-// // 	Must return pid of the child process, otherwise shouldn't be a valid pid. In child process, the return value should be 0. 
-// // 	The child should have DUPLICATED resources including file descriptor and virtual memory space. 
-// // 	Parent process should never return from the fork until it knows whether the child process successfully cloned. 
-// // 	That is, if the child process fail to duplicate the resource, the fork () call of parent should return the TID_ERROR.
+tid_t fork(const char *thread_name, struct intr_frame *f)
+{
+	// 	Create new process which is the clone of current process with the name THREAD_NAME.
+	// 	You don't need to clone the value of the registers except %RBX, %RSP, %RBP, and %R12 - %R15, which are callee-saved registers.
+	// 	Must return pid of the child process, otherwise shouldn't be a valid pid. In child process, the return value should be 0.
+	// 	The child should have DUPLICATED resources including file descriptor and virtual memory space.
+	// 	Parent process should never return from the fork until it knows whether the child process successfully cloned.
+	// 	That is, if the child process fail to duplicate the resource, the fork () call of parent should return the TID_ERROR.
 
-// // The template utilizes the pml4_for_each() in threads/mmu.c to copy entire user memory space, including corresponding pagetable structures, 
-// // but you need to fill missing parts of passed pte_for_each_func (See virtual address).
-
-// }
-
-int exec (const char *cmd_line) {
-	return process_exec(cmd_line);
+	// The template utilizes the pml4_for_each() in threads/mmu.c to copy entire user memory space, including corresponding pagetable structures,
+	// but you need to fill missing parts of passed pte_for_each_func (See virtual address).
+	process_fork(thread_name, f);
 }
 
+int exec (const char *cmd_line) {
+	check_address(cmd_line);
+	char *fn_copy = palloc_get_page(PAL_ZERO);
 
+	if (fn_copy == NULL) return -1;
+	strlcpy(fn_copy, cmd_line, PGSIZE);
+	
+	if (process_exec(fn_copy) == -1) return -1;
+
+	NOT_REACHED();
+	return 0;
+}
 
 // int wait(pid_t pid) {
 // 	/* waits for a child process pid and retrieves the child's exit status. if pid is still alive, waits unitl it terminates.
@@ -162,115 +178,196 @@ int exec (const char *cmd_line) {
 // 	- the process that calls wait has already called wait on pid. that is, a process may wait for any given child at most once.*/
 // };
 
+int wait(tid_t pid){
+	return process_wait(pid);
+}
+
 bool create (const char *file, unsigned initial_size) {
+	check_address(file);
 	if (file == "NULL" | file == NULL) exit(-1);
 	else	return filesys_create(file, initial_size);
 }
-bool remove (const char *file) {
 
+bool remove (const char *file) {
+	check_address(file);
 	return filesys_remove(file);
 }
+
 int open (const char *file) {
+	check_address(file);
 	if (file == NULL) return -1;
 	struct file *file_ = filesys_open(file);
-	if (file_ == NULL) {
-	return -1;
+	if (file_ == NULL) return -1;  // 파일이 생성되지 않으면 fail
+
+	struct file **fdt = thread_current()->file_descriptors_table;
+	int fd = thread_current()->fdidx;
+
+	while (thread_current()->file_descriptors_table[fd] != NULL && fd < 64) {
+		fd++;
 	}
 
-	struct file_descriptor *file_desc = palloc_get_page(0);
+	if (fd >= 64) return -1;
 
-	file_desc->fd = allocate_fd();
-	file_desc->file = file_;
+	thread_current()->fdidx = fd;
+	fdt[fd] = file;
+	
+	if (fd == -1) file_close(file); // 파일을 열 수 없으면
 
-	list_push_back(&thread_current()->file_descriptors, &file_desc->elem);
+	return fd;
 
-	if (file_desc->fd >= 0) return file_desc->fd;
-	else return -1;
+
+	// struct file_descriptor *file_desc = palloc_get_page(0);
+
+	// file_desc->fd = allocate_fd();
+	// file_desc->file = file_;
+
+	// list_push_back(&thread_current()->file_descriptors_table, &file_desc->elem);
+
+	// if (file_desc->fd >= 0) return file_desc->fd;
+	// else return -1;
 }
 
 int filesize (int fd) {
-	struct file_descriptor *file_desc = find_file_descriptor(fd);
-	file_length(file_desc->file);
+	// struct file_descriptor *file_desc = find_file_descriptor(fd);
+	// file_length(file_desc->file);
+
+	struct file **fdt = thread_current()->file_descriptors_table;
+	struct file *file = fdt[fd]; 
+	
+	if (file == NULL) return -1;
+
+	file_length(file);
 }
 	
 
 int read (int fd, void *buffer, unsigned size) {
-	if (!fd) return -1;
-	if (fd == 0) 
-	{
+	check_address(buffer);
+	if (!fd || fd == 1) return -1;
+	if (fd == 0) {
 		unsigned i;
 		for (i = 0; i < size; i++)
 		{
-			*(uint8_t *)(buffer + i) = input_getc();
+			*(uint8_t *)(&buffer + i) = input_getc();
 		}
 		return size;
 	}
+
+	// struct file_descriptor *file_ = find_file_descriptor(fd);
+	//if (file_ == NULL)	return -1;
+	//else return file_read(file_->file, buffer, size);
 	
-		
+	struct file **fdt = thread_current()->file_descriptors_table;
+	struct file *file = fdt[fd]; 
 
-	struct file_descriptor *file_ = find_file_descriptor(fd);
+	if (file == NULL) return -1;
+	else {
+		lock_acquire(&file_lock);
+		file_read(file, buffer, size);
+		lock_release(&file_lock);
+	}
 
-	if (file_ == NULL)	return -1;
-	else return file_read(file_->file, buffer, size);
-
+	return file_read(file, buffer, size);
 }
 
 int write (int fd, const void *buffer, unsigned size) {
+	check_address(buffer);
 
-	struct file_descriptor *file_desc = find_file_descriptor(fd);
+	// struct file_descriptor *file_desc = find_file_descriptor(fd);
+	struct file **fdt = thread_current()->file_descriptors_table;
+	struct file *file = fdt[fd];
+	int read_count;
 
-	if (fd == 1) {
+	lock_acquire(&file_lock);
+
+	if (fd == 0) { // 입력
 		putbuf(buffer, size);
-		
-	} else { 
-		if (!file_desc) {
+		return read_count = size;
+	} else if (fd == 1) {// 출력
+		return -1;
+	} 
+	else if (fd >= 2) { 
+		if (!file) {
+			lock_release(&file_lock);
 			return -1;
 		}
-		return file_write(file_desc->file, buffer, size);
+		read_count = file_write(file, buffer, size);
 	}
+	lock_release(&file_lock);
+	return read_count;
 }
 
 
 void seek (int fd, unsigned position) {
-	struct file_descriptor *file_desc = find_file_descriptor(fd);
-	file_seek(file_desc->file, position);
+	// struct file_descriptor *file_desc = find_file_descriptor(fd);
+	// file_seek(file_desc->file, position);
+
+	struct file **fdt = thread_current()->file_descriptors_table;
+	struct file *file = fdt[fd];
+
+	file_seek(file, position);
 }
+
+
 unsigned tell (int fd) {
 
-	struct file_descriptor *file_desc = find_file_descriptor(fd);
-	return file_tell(file_desc->file);
+	// struct file_descriptor *file_desc = find_file_descriptor(fd);
+	// return file_tell(file_desc->file);
+
+	struct file **fdt = thread_current()->file_descriptors_table;
+	struct file *file = fdt[fd]; 
+
+	return file_tell(file);
 }
 
 
 void close (int fd) {
-	if (!fd || fd > 64) return -1;
-	struct file_descriptor *file_desc = find_file_descriptor(fd);
-    if (file_desc != NULL) {
-        file_close(file_desc->file);
-        list_remove(&file_desc->elem);
-        palloc_free_page(file_desc);
-    }
+	// struct file_descriptor *file_desc = find_file_descriptor(fd);
+    // if (file_desc != NULL) {
+    //     file_close(file_desc->file);
+    //     list_remove(&file_desc->elem);
+    //     palloc_free_page(file_desc);
+    // }
+
+	struct file **fdt = thread_current()->file_descriptors_table;
+	struct file *file = fdt[fd]; 
+
+	if (file == NULL) return;
+	if (fd < 2 || fd >=64) return;
+
+	fdt[fd] = NULL;
 
 }
 
 
-struct file_descriptor *find_file_descriptor (int fd) {
-	struct thread *cur = thread_current();
-	struct list_elem *e;
-	for (e = list_begin(&cur->file_descriptors); e != list_end(&cur->file_descriptors); e = list_next(e)) {
-		struct file_descriptor *file_desc = list_entry(e, struct file_descriptor, elem);
-		if (file_desc->fd == fd) {
-			return file_desc;
-			}
-	}
-	return NULL;
-}
+// struct file_descriptor *find_file_descriptor (int fd) {
+// 	struct thread *cur = thread_current();
+// 	struct list_elem *e;
+// 	for (e = list_begin(&cur->file_descriptors_table); e != list_end(&cur->file_descriptors_table); e = list_next(e)) {
+// 		struct file_descriptor *file_desc = list_entry(e, struct file_descriptor, elem);
+// 		if (file_desc->fd == fd) {
+// 			return file_desc;
+// 			}
+// 	}
+// 	return NULL;
+// }
 
-int allocate_fd (void) {
-	struct thread *cur = thread_current();
-	int fd = 2;
-	while (true) {
-		if (find_file_descriptor(fd) == NULL) return fd;
-		fd++;
-	}
-}
+// struct file *find_file_descriptor(int fd){
+// 	struct thread *current = thread_current();
+
+// 	for (int i= 2; i< 64; i++){
+// 		struct file *file = parent->file_descriptors_table[i];
+// 		if (file == NULL) continue;
+// 		current->file_descriptors_table[i] = file_duplicate(i);
+// 	}
+
+// 	return NULL;
+// }
+
+// int allocate_fd (void) {
+// 	struct thread *cur = thread_current();
+// 	int fd = 2;
+// 	while (true) {
+// 		if (find_file_descriptor(fd) == NULL) return fd;
+// 		fd++; // 파일디스크립터 존재하면 fd++ 루프 반복
+// 	}
+// }

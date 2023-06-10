@@ -99,18 +99,30 @@ struct thread {
 	int priority;                       /* Priority. */
 	int old_priority;
 	int64_t wakeup_tick;
+	
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 	struct list donations;
 	struct list_elem d_elem;
 	struct lock *wait_on_lock;
-	struct list file_descriptors;
-	struct list children;
+
+	struct thread *parent;
+	struct intr_frame parent_if;
+	struct list child_list;
 	struct list_elem child_elem;
+	
+	struct file **file_descriptors_table;
+	int fdidx;
+
 	struct list waited_children;
 	tid_t waited_tid;
+
+	struct semaphore fork_sema;
+	struct semaphore wait_sema;
 	struct semaphore exit_sema;
-	int exit_status;
+	int exit_status; 
+
+
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
