@@ -14,28 +14,34 @@
 #include "threads/palloc.h"
 #include "lib/kernel/stdio.h"
 #include "userprog/process.h"
-#include "lib/string.h"
+#include "threads/vaddr.h"
+// #include "lib/user/syscall.h"
 
 
-
-static struct file_descriptor *find_file_descriptor (int fd);
-// static int allocate_fd (void);
-
-void check_address(void *addr);
-void halt (void);
-void exit (int status);
-bool create (const char *file, unsigned initial_size);
-bool remove (const char *file);
-int open (const char *file);
-int filesize (int fd);
-int read (int fd, void *buffer, unsigned size);
-int write (int fd, const void *buffer, unsigned size);
-void seek (int fd, unsigned position);
-unsigned tell (int fd);
+typedef int pid_t;
+struct file_descriptor *find_file_descriptor (int fd);
+int allocate_fd (void);
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
+void check_address(void *addr);
+
+void halt (void) NO_RETURN;
+void exit (int status) NO_RETURN;
+
+int exec (const char *file);
+int wait (pid_t);
+bool create (const char *file, unsigned initial_size);
+bool remove (const char *file);
+pid_t fork (const char *thread_name, struct intr_frame *if_);
+int open (const char *file);
+int filesize (int fd);
+int read (int fd, void *buffer, unsigned length);
+int write (int fd, const void *buffer, unsigned length);
+void seek (int fd, unsigned position);
+unsigned tell (int fd);
+void close (int fd);
 /* System call.
  *
  * Previously system call services was handled by the interrupt handler
@@ -69,7 +75,6 @@ void
 syscall_handler (struct intr_frame *f UNUSED) {
 	//TODO: Your implementation goes here.
 
-
 	switch (f->R.rax) {
 		case SYS_HALT:
 			halt();
@@ -78,7 +83,8 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			exit(f->R.rdi);
 			break;
 		case SYS_FORK:
-			f->R.rax = fork(f->R.rdi, f);
+			memcpy(&thread_current()->parent_if, f, sizeof(struct intr_frame));
+			f->R.rax = fork(f->R.rdi, &thread_current()->parent_if);
 			break;
 		case SYS_EXEC:
 			f->R.rax = exec(f->R.rdi);
@@ -131,112 +137,133 @@ void halt (void) {
 }
 
 void exit (int status) {
-	// Terminates the current user program, returning status to the kernel. 
-	// If the process's parent waits for it (see below), this is the status that will be returned. 
-	// Conventionally, a status of 0 indicates success and nonzero values indicate errors.
+	struct thread *cur = thread_current();
+	cur->exit_status = status;
 	printf("%s: exit(%d)\n", thread_name(), status);
 	thread_exit();
 }
 
-tid_t fork(const char *thread_name, struct intr_frame *f)
-{
-	// 	Create new process which is the clone of current process with the name THREAD_NAME.
-	// 	You don't need to clone the value of the registers except %RBX, %RSP, %RBP, and %R12 - %R15, which are callee-saved registers.
-	// 	Must return pid of the child process, otherwise shouldn't be a valid pid. In child process, the return value should be 0.
-	// 	The child should have DUPLICATED resources including file descriptor and virtual memory space.
-	// 	Parent process should never return from the fork until it knows whether the child process successfully cloned.
-	// 	That is, if the child process fail to duplicate the resource, the fork () call of parent should return the TID_ERROR.
+// 피호출자(callee) 저장 레지스터인 %RBX, %RSP, %RBP와 %R12 - %R15를 제외한 레지스터 값을 복제할 필요가 없습니다. 
+// 자식 프로세스의 pid를 반환해야 합니다. 그렇지 않으면 유효한 pid가 아닐 수 있습니다. 자식 프로세스에서 반환 값은 0이어야 합니다. 
+// 자식 프로세스에는 파일 식별자 및 가상 메모리 공간을 포함한 복제된 리소스가 있어야 합니다. 
+// 부모 프로세스는 자식 프로세스가 성공적으로 복제되었는지 여부를 알 때까지 fork에서 반환해서는 안 됩니다. 
+// 즉, 자식 프로세스가 리소스를 복제하지 못하면 부모의 fork() 호출이 TID_ERROR를 반환할 것입니다.
+// 템플릿은 `threads/mmu.c`의 `pml4_for_each`를 사용하여 해당되는 페이지 테이블 구조를 포함한 전체 사용자 메모리 공간을 복사하지만, 
+// 전달된 `pte_for_each_func`의 누락된 부분을 채워야 합니다.
+pid_t fork (const char *thread_name, struct intr_frame *if_){
 
-	// The template utilizes the pml4_for_each() in threads/mmu.c to copy entire user memory space, including corresponding pagetable structures,
-	// but you need to fill missing parts of passed pte_for_each_func (See virtual address).
-	process_fork(thread_name, f);
+	return process_fork(thread_name, if_);
 }
 
 int exec (const char *cmd_line) {
-	check_address(cmd_line);
-	char *fn_copy = palloc_get_page(PAL_ZERO);
+	if ((is_user_vaddr(cmd_line) == false) || (cmd_line == NULL) || (pml4_get_page (thread_current()->pml4, cmd_line) == NULL))
+		exit(-1);
+	return process_exec(cmd_line);
+	// check_address(cmd_line);
+	// char *fn_copy = palloc_get_page(PAL_ZERO);
 
-	if (fn_copy == NULL) return -1;
-	strlcpy(fn_copy, cmd_line, PGSIZE);
+	// if (fn_copy == NULL) return -1;
+	// strlcpy(fn_copy, cmd_line, PGSIZE);
 	
-	if (process_exec(fn_copy) == -1) return -1;
+	// if (process_exec(fn_copy) == -1) return -1;
 
-	NOT_REACHED();
-	return 0;
+	// NOT_REACHED();
+	// return 0;
 }
 
-// int wait(pid_t pid) {
-// 	/* waits for a child process pid and retrieves the child's exit status. if pid is still alive, waits unitl it terminates.
-// 	then, returns the status that pid passed to exit. if pid did not call exit(), but was terminated by the kernel(e.g. killed due to an exception),
-// 	wait(pid) must return -1. it tis perfectly legal for a parent process to wait for child processes that have already terminated by the time the parent calls wait, 
-// 	but the kernel must still allow the parent to retrieve its child's exit status, or learn that the child was terminated by the kernel.
-	
-// 	wait must fail and return -1 immediately if any of the following conditions is true:
-// 	- pid does not refer to a direct child of the calling process. pid is a direct child of the calling process if and only if the calling process received pid as a return value
-// 	from a successful call to fork. note that children are not inherited: if a spawns child b and b spawns child process c,
-// 	then a cannot wait for c, even if b is dead. a call to wait(c) by process a must fail. similarly, orphaned processes are not assigned to a new parent if their parent process exists before they do.
-// 	- the process that calls wait has already called wait on pid. that is, a process may wait for any given child at most once.*/
-// };
 
-int wait(tid_t pid){
+// 자식 프로세스 (pid) 를 기다려서 자식의 종료 상태(exit status)를 가져옵니다. 만약 pid (자식 프로세스)가 아직 살아있으면, 
+// 종료 될 때 까지 기다립니다. 종료가 되면 그 프로세스가 exit 함수로 전달해준 상태(exit status)를 반환합니다. 
+
+// 만약 pid (자식 프로세스)가 exit() 함수를 호출하지 않고 커널에 의해서 종료된다면 
+// (e.g exception에 의해서 죽는 경우), wait(pid) 는  -1을 반환해야 합니다. 
+
+// 부모 프로세스가 wait 함수를 호출한 시점에서 이미 종료되어버린 자식 프로세스를 기다리도록 하는 것은 완전히 합당합니다만, 
+// 커널은 부모 프로세스에게 자식의 종료 상태를 알려주든지, 커널에 의해 종료되었다는 사실을 알려주든지 해야 합니다.
+// 다음의 조건들 중 하나라도 참이면 wait 은 즉시 fail 하고 -1 을 반환합니다 :
+// pid 는 호출하는 프로세스의 직속 자식을 참조하지 않습니다. 오직 호출하는 프로세스가 fork() 호출 후 성공적으로 pid를 반환받은 경우에만, 
+// pid 는 호출하는 프로세스의 직속 자식입니다.
+
+// 자식들은 상속되지 않는다는 점을 알아두세요 :  만약 A 가 자식 B를 낳고 B가 자식 프로세스 C를  낳는다면, A는 C를 기다릴 수 없습니다. 
+// 심지어 B가 죽은 경우에도요. 프로세스 A가  wait(C) 호출하는 것은 실패해야 합니다. 
+
+// 마찬가지로, 부모 프로세스가 먼저 종료되버리는 고아 프로세스들도 새로운 부모에게 할당되지 않습니다.
+// wait 를 호출한 프로세스가 이미 pid에 대해 기다리는 wait 를 호출한 상태 일 때 입니다. 
+// 즉, 한 프로세스는 어떤 주어진 자식에 대해서 최대 한번만 wait 할 수 있습니다.
+// 프로세스들은 자식을 얼마든지 낳을 수 있고 그 자식들을 어떤 순서로도 기다릴 (wait) 수 있습니다. 
+// 자식 몇 개로부터의 신호는 기다리지 않고도 종료될 수 있습니다. (전부를 기다리지 않기도 합니다.) 
+
+// 여러분의 설계는 발생할 수 있는 기다림의 모든 경우를 고려해야합니다. 
+// 한 프로세스의 (그 프로세스의 struct thread 를 포함한) 자원들은 꼭 할당 해제되어야 합니다. 
+
+// 부모가 그 프로세스를 기다리든 아니든, 자식이 부모보다 먼저 종료되든 나중에 종료되든 상관없이 이뤄져야  합니다.
+// 최초의 process가 종료되기 전에 Pintos가 종료되지 않도록 하십시오. 
+
+// 제공된 Pintos 코드는 main() (in threads/init.c)에서 process_wait() (in userprog/process.c ) 를 
+// 호출하여 Pintos가 최초의 process 보다 먼저 종료되는 것을 막으려고 시도합니다.  
+
+// 여러분은 함수 설명의 제일 위의 코멘트를 따라서 process_wait() 를 구현하고 process_wait() 의 방식으로 
+// wait system call을 구현해야 할 겁니다.
+// 이 시스템 콜을 구현하는 것이 다른 어떤 시스템콜을 구현하는 것보다 더 많은 작업을 요구합니다.
+
+int wait(pid_t pid) {
 	return process_wait(pid);
-}
+};
+
+
 
 bool create (const char *file, unsigned initial_size) {
-	check_address(file);
-	if (file == "NULL" | file == NULL) exit(-1);
+	// check_address(file);
+	// if (file == "NULL" | file == NULL) exit(-1);
+	if ((is_user_vaddr(file) == false) || (file == NULL) || (pml4_get_page (thread_current()->pml4, file) == NULL))
+		exit(-1);
+	if (file == NULL) exit(-1);
 	else	return filesys_create(file, initial_size);
 }
 
 bool remove (const char *file) {
-	check_address(file);
+	if ((is_user_vaddr(file) == false) || (file == NULL) || (pml4_get_page (thread_current()->pml4, file) == NULL))
+		exit(-1);
 	return filesys_remove(file);
 }
 
 int open (const char *file) {
-	check_address(file);
+	if ((is_user_vaddr(file) == false) || (file == NULL) || (pml4_get_page (thread_current()->pml4, file) == NULL))
+		exit(-1);
 	if (file == NULL) return -1;
+	
 	struct file *file_ = filesys_open(file);
 	if (file_ == NULL) return -1;  // 파일이 생성되지 않으면 fail
 
-	struct file **fdt = thread_current()->file_descriptors_table;
-	int fd = thread_current()->fdidx;
+	// struct file **fdt = thread_current()->file_descriptors_table;
+	// int fd = thread_current()->fdidx;
 
-	while (thread_current()->file_descriptors_table[fd] != NULL && fd < 64) {
-		fd++;
-	}
-
-	if (fd >= 64) return -1;
-
-	thread_current()->fdidx = fd;
-	fdt[fd] = file;
+	// while (thread_current()->file_descriptors_table[fd] != NULL && fd < 64) {
+	// 	fd++;
+	// }
 	
-	if (fd == -1) file_close(file); // 파일을 열 수 없으면
+	struct file_descriptor *file_desc = palloc_get_page(0);
 
-	return fd;
+	file_desc->fd = allocate_fd();
+	file_desc->file = file_;
 
 
-	// struct file_descriptor *file_desc = palloc_get_page(0);
-
-	// file_desc->fd = allocate_fd();
-	// file_desc->file = file_;
-
-	// list_push_back(&thread_current()->file_descriptors_table, &file_desc->elem);
-
-	// if (file_desc->fd >= 0) return file_desc->fd;
-	// else return -1;
+	list_push_back(&thread_current()->file_descriptors, &file_desc->elem);
+	
+	if (file_desc->fd >= 0) return file_desc->fd;
+	else return -1;
 }
 
 int filesize (int fd) {
-	// struct file_descriptor *file_desc = find_file_descriptor(fd);
-	// file_length(file_desc->file);
+	struct file_descriptor *file_desc = find_file_descriptor(fd);
+	file_length(file_desc->file);
 
-	struct file **fdt = thread_current()->file_descriptors_table;
-	struct file *file = fdt[fd]; 
+	// struct file **fdt = thread_current()->file_descriptors_table;
+	// struct file *file = fdt[fd]; 
 	
-	if (file == NULL) return -1;
+	// if (file == NULL) return -1;
 
-	file_length(file);
+	// file_length(file);
 }
 	
 
@@ -272,11 +299,14 @@ int read (int fd, void *buffer, unsigned size) {
 int write (int fd, const void *buffer, unsigned size) {
 	check_address(buffer);
 
-	// struct file_descriptor *file_desc = find_file_descriptor(fd);
-	struct file **fdt = thread_current()->file_descriptors_table;
-	struct file *file = fdt[fd];
-	int read_count;
+	struct file_descriptor *file_desc = find_file_descriptor(fd);
+	// struct file **fdt = thread_current()->file_descriptors_table;
+	// struct file *file = fdt[fd];
+	// int read_count;
 
+	struct file_descriptor *file_desc = find_file_descriptor(fd);
+	
+	if (fd == 1) {
 	lock_acquire(&file_lock);
 
 	if (fd == 0) { // 입력
@@ -301,40 +331,40 @@ void seek (int fd, unsigned position) {
 	// struct file_descriptor *file_desc = find_file_descriptor(fd);
 	// file_seek(file_desc->file, position);
 
-	struct file **fdt = thread_current()->file_descriptors_table;
-	struct file *file = fdt[fd];
+	// struct file **fdt = thread_current()->file_descriptors_table;
+	// struct file *file = fdt[fd];
 
-	file_seek(file, position);
+	// file_seek(file, position);
 }
 
 
 unsigned tell (int fd) {
 
-	// struct file_descriptor *file_desc = find_file_descriptor(fd);
-	// return file_tell(file_desc->file);
+	struct file_descriptor *file_desc = find_file_descriptor(fd);
+	return file_tell(file_desc->file);
 
-	struct file **fdt = thread_current()->file_descriptors_table;
-	struct file *file = fdt[fd]; 
+	// struct file **fdt = thread_current()->file_descriptors_table;
+	// struct file *file = fdt[fd]; 
 
-	return file_tell(file);
+	// return file_tell(file);
 }
 
 
 void close (int fd) {
-	// struct file_descriptor *file_desc = find_file_descriptor(fd);
-    // if (file_desc != NULL) {
-    //     file_close(file_desc->file);
-    //     list_remove(&file_desc->elem);
-    //     palloc_free_page(file_desc);
-    // }
+	struct file_descriptor *file_desc = find_file_descriptor(fd);
+    if (file_desc != NULL) {
+        file_close(file_desc->file);
+        list_remove(&file_desc->elem);
+        palloc_free_page(file_desc);
+    }
 
-	struct file **fdt = thread_current()->file_descriptors_table;
-	struct file *file = fdt[fd]; 
+	// struct file **fdt = thread_current()->file_descriptors_table;
+	// struct file *file = fdt[fd]; 
 
-	if (file == NULL) return;
-	if (fd < 2 || fd >=64) return;
+	// if (file == NULL) return;
+	// if (fd < 2 || fd >=64) return;
 
-	fdt[fd] = NULL;
+	// fdt[fd] = NULL;
 
 }
 
