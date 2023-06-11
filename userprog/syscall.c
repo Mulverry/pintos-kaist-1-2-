@@ -24,9 +24,6 @@ int allocate_fd (void);
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
-
-void check_address(void *addr);
-
 void halt (void) NO_RETURN;
 void exit (int status) NO_RETURN;
 
@@ -125,12 +122,6 @@ syscall_handler (struct intr_frame *f UNUSED) {
 
 }
 
-void check_address(void *addr){
-	struct thread *current = thread_current();
-	if (!is_user_vaddr(addr) || addr == NULL || pml4_get_page(current->pml4, addr)) {
-		exit(-1);
-	}
-}
 
 void halt (void) {
 	power_off();
@@ -140,6 +131,15 @@ void exit (int status) {
 	struct thread *cur = thread_current();
 	cur->exit_status = status;
 	printf("%s: exit(%d)\n", thread_name(), status);
+	for (int fd = 2; fd < 127; fd++) {
+		struct file_descriptor *file_desc = find_file_descriptor(fd);
+    if (file_desc != NULL) {
+        file_close(file_desc->file);
+        list_remove(&file_desc->elem);
+        palloc_free_page(file_desc);
+		file_desc = NULL;
+    }
+	}
 	thread_exit();
 }
 
@@ -159,16 +159,6 @@ int exec (const char *cmd_line) {
 	if ((is_user_vaddr(cmd_line) == false) || (cmd_line == NULL) || (pml4_get_page (thread_current()->pml4, cmd_line) == NULL))
 		exit(-1);
 	return process_exec(cmd_line);
-	// check_address(cmd_line);
-	// char *fn_copy = palloc_get_page(PAL_ZERO);
-
-	// if (fn_copy == NULL) return -1;
-	// strlcpy(fn_copy, cmd_line, PGSIZE);
-	
-	// if (process_exec(fn_copy) == -1) return -1;
-
-	// NOT_REACHED();
-	// return 0;
 }
 
 
@@ -210,44 +200,29 @@ int wait(pid_t pid) {
 	return process_wait(pid);
 };
 
-
-
 bool create (const char *file, unsigned initial_size) {
-	// check_address(file);
-	// if (file == "NULL" | file == NULL) exit(-1);
 	if ((is_user_vaddr(file) == false) || (file == NULL) || (pml4_get_page (thread_current()->pml4, file) == NULL))
 		exit(-1);
 	if (file == NULL) exit(-1);
 	else	return filesys_create(file, initial_size);
 }
-
 bool remove (const char *file) {
 	if ((is_user_vaddr(file) == false) || (file == NULL) || (pml4_get_page (thread_current()->pml4, file) == NULL))
 		exit(-1);
 	return filesys_remove(file);
 }
-
 int open (const char *file) {
 	if ((is_user_vaddr(file) == false) || (file == NULL) || (pml4_get_page (thread_current()->pml4, file) == NULL))
 		exit(-1);
 	if (file == NULL) return -1;
-	
 	struct file *file_ = filesys_open(file);
-	if (file_ == NULL) return -1;  // 파일이 생성되지 않으면 fail
-
-	// struct file **fdt = thread_current()->file_descriptors_table;
-	// int fd = thread_current()->fdidx;
-
-	// while (thread_current()->file_descriptors_table[fd] != NULL && fd < 64) {
-	// 	fd++;
-	// }
+	if (file_ == NULL) 	return -1;
 	
 	struct file_descriptor *file_desc = palloc_get_page(0);
 
 	file_desc->fd = allocate_fd();
 	file_desc->file = file_;
-
-
+	
 	list_push_back(&thread_current()->file_descriptors, &file_desc->elem);
 	
 	if (file_desc->fd >= 0) return file_desc->fd;
@@ -257,147 +232,89 @@ int open (const char *file) {
 int filesize (int fd) {
 	struct file_descriptor *file_desc = find_file_descriptor(fd);
 	file_length(file_desc->file);
-
-	// struct file **fdt = thread_current()->file_descriptors_table;
-	// struct file *file = fdt[fd]; 
-	
-	// if (file == NULL) return -1;
-
-	// file_length(file);
 }
 	
 
 int read (int fd, void *buffer, unsigned size) {
-	check_address(buffer);
-	if (!fd || fd == 1) return -1;
-	if (fd == 0) {
+	if ((is_user_vaddr(buffer) == false) || (buffer == NULL) || (pml4_get_page (thread_current()->pml4, buffer) == NULL))
+		exit(-1);
+
+	if (!fd) return -1;
+	if (fd == 0) 
+	{
 		unsigned i;
 		for (i = 0; i < size; i++)
 		{
-			*(uint8_t *)(&buffer + i) = input_getc();
+			*(uint8_t *)(buffer + i) = input_getc();
 		}
 		return size;
 	}
-
-	// struct file_descriptor *file_ = find_file_descriptor(fd);
-	//if (file_ == NULL)	return -1;
-	//else return file_read(file_->file, buffer, size);
 	
-	struct file **fdt = thread_current()->file_descriptors_table;
-	struct file *file = fdt[fd]; 
+		
 
-	if (file == NULL) return -1;
-	else {
-		lock_acquire(&file_lock);
-		file_read(file, buffer, size);
-		lock_release(&file_lock);
-	}
+	struct file_descriptor *file_ = find_file_descriptor(fd);
+	if (file_ == NULL)	return -1;
+	else return file_read(file_->file, buffer, size);
 
-	return file_read(file, buffer, size);
 }
 
 int write (int fd, const void *buffer, unsigned size) {
-	check_address(buffer);
 
 	struct file_descriptor *file_desc = find_file_descriptor(fd);
-	// struct file **fdt = thread_current()->file_descriptors_table;
-	// struct file *file = fdt[fd];
-	// int read_count;
-
-	struct file_descriptor *file_desc = find_file_descriptor(fd);
-	
 	if (fd == 1) {
-	lock_acquire(&file_lock);
-
-	if (fd == 0) { // 입력
 		putbuf(buffer, size);
-		return read_count = size;
-	} else if (fd == 1) {// 출력
-		return -1;
-	} 
-	else if (fd >= 2) { 
-		if (!file) {
-			lock_release(&file_lock);
+
+	} else { 
+		if (!file_desc) {
 			return -1;
 		}
-		read_count = file_write(file, buffer, size);
+
+		return file_write(file_desc->file, buffer, size);
 	}
-	lock_release(&file_lock);
-	return read_count;
 }
 
 
 void seek (int fd, unsigned position) {
-	// struct file_descriptor *file_desc = find_file_descriptor(fd);
-	// file_seek(file_desc->file, position);
-
-	// struct file **fdt = thread_current()->file_descriptors_table;
-	// struct file *file = fdt[fd];
-
-	// file_seek(file, position);
+	struct file_descriptor *file_desc = find_file_descriptor(fd);
+	file_seek(file_desc->file, position);
 }
-
-
 unsigned tell (int fd) {
 
 	struct file_descriptor *file_desc = find_file_descriptor(fd);
 	return file_tell(file_desc->file);
-
-	// struct file **fdt = thread_current()->file_descriptors_table;
-	// struct file *file = fdt[fd]; 
-
-	// return file_tell(file);
 }
 
 
 void close (int fd) {
+	if (!fd || fd > 128) exit(-1);
 	struct file_descriptor *file_desc = find_file_descriptor(fd);
     if (file_desc != NULL) {
         file_close(file_desc->file);
         list_remove(&file_desc->elem);
         palloc_free_page(file_desc);
+		file_desc = NULL;
     }
-
-	// struct file **fdt = thread_current()->file_descriptors_table;
-	// struct file *file = fdt[fd]; 
-
-	// if (file == NULL) return;
-	// if (fd < 2 || fd >=64) return;
-
-	// fdt[fd] = NULL;
 
 }
 
 
-// struct file_descriptor *find_file_descriptor (int fd) {
-// 	struct thread *cur = thread_current();
-// 	struct list_elem *e;
-// 	for (e = list_begin(&cur->file_descriptors_table); e != list_end(&cur->file_descriptors_table); e = list_next(e)) {
-// 		struct file_descriptor *file_desc = list_entry(e, struct file_descriptor, elem);
-// 		if (file_desc->fd == fd) {
-// 			return file_desc;
-// 			}
-// 	}
-// 	return NULL;
-// }
+struct file_descriptor *find_file_descriptor (int fd) {
+	struct thread *cur = thread_current();
+	struct list_elem *e;
+	for (e = list_begin(&cur->file_descriptors); e != list_end(&cur->file_descriptors); e = list_next(e)) {
+		struct file_descriptor *file_desc = list_entry(e, struct file_descriptor, elem);
+		if (file_desc->fd == fd) {
+			return file_desc;
+			}
+	}
+	return NULL;
+}
 
-// struct file *find_file_descriptor(int fd){
-// 	struct thread *current = thread_current();
-
-// 	for (int i= 2; i< 64; i++){
-// 		struct file *file = parent->file_descriptors_table[i];
-// 		if (file == NULL) continue;
-// 		current->file_descriptors_table[i] = file_duplicate(i);
-// 	}
-
-// 	return NULL;
-// }
-
-// int allocate_fd (void) {
-// 	struct thread *cur = thread_current();
-// 	int fd = 2;
-// 	while (true) {
-// 		if (find_file_descriptor(fd) == NULL) return fd;
-// 		fd++; // 파일디스크립터 존재하면 fd++ 루프 반복
-// 	}
-// }
+int allocate_fd (void) {
+	struct thread *cur = thread_current();
+	int fd = 2;
+	while (fd < 128) {
+		if (find_file_descriptor(fd) == NULL) return fd;
+		fd++;
+	}
+}
