@@ -216,7 +216,10 @@ thread_create (const char *name, int priority,
 	/* Allocate thread. */
 	t = palloc_get_page (PAL_ZERO);
 	if (t == NULL)
+	{
+		palloc_free_page(t);
 		return TID_ERROR;
+	}
 
 	/* Initialize thread. */
 	init_thread (t, name, priority);
@@ -232,7 +235,7 @@ thread_create (const char *name, int priority,
 	
 	fd0->fd = 0;
 	list_push_front(&thread_current()->file_descriptors, &fd0->elem);
-	// list_push_back(&thread_current()->children, &t->child_elem);
+	list_push_back(&thread_current()->children, &t->child_elem);
 
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
@@ -245,7 +248,6 @@ thread_create (const char *name, int priority,
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
 	
-
 	/* Add to run queue. */
 	// thread_unblock (t);
 
@@ -444,7 +446,6 @@ idle (void *idle_started_ UNUSED) {
 		/* Let someone else run. */
 		intr_disable ();
 		thread_block ();
-
 		/* Re-enable interrupts and wait for the next one.
 
 		   The `sti' instruction disables interrupts until the
@@ -479,12 +480,11 @@ init_thread (struct thread *t, const char *name, int priority) {
 	ASSERT (t != NULL);
 	ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
 	ASSERT (name != NULL);
-	
+
 	memset (t, 0, sizeof *t);
 	t->status = THREAD_BLOCKED;
 	strlcpy (t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
-
 	t->priority = priority;
 	t->old_priority = priority;
 	t->magic = THREAD_MAGIC;
@@ -494,7 +494,9 @@ init_thread (struct thread *t, const char *name, int priority) {
 	list_init(&t->children);
 	list_init(&t->waited_children);
 	sema_init(&t->exit_sema, 0);
-	t->exit_status = -1;
+	sema_init(&t->free_sema, 0);
+	sema_init(&t->fork_sema, 0);
+	t->exit_status = 0;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

@@ -112,7 +112,8 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
 	newpage = palloc_get_page(PAL_USER);
-	if (newpage == NULL)	return false;
+	if (newpage == NULL)		return false;
+
 	/* 4. TODO: Duplicate parent's page to the new page and
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
 	 *    TODO: according to the result). */
@@ -297,7 +298,6 @@ process_wait (tid_t child_tid UNUSED) {
 	sema_up(&t->free_sema);
 	remove_child_thread(t);	
 	return exit_status;
-
 	
 	// tid가 커널에 의해 종료되었다면 -1반환
 	return -1;
@@ -314,10 +314,8 @@ void
 process_exit (void) {
 	struct thread *curr = thread_current ();
 	sema_up(&curr->exit_sema);
+	file_close(curr->running_file);
 	sema_down(&curr->free_sema);
-	
-	// printf ("%s: exit(%d)\n", thread_name(), curr->exit_status);
-
 	process_cleanup ();
 }
 
@@ -443,6 +441,7 @@ load (const char *file_name, struct intr_frame *if_, char **argv, int argc) {
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
 	}
+	t->running_file = file;
 
 	/* Read and verify executable header. */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -464,7 +463,6 @@ load (const char *file_name, struct intr_frame *if_, char **argv, int argc) {
 		if (file_ofs < 0 || file_ofs > file_length (file))
 			goto done;
 		file_seek (file, file_ofs);
-
 		if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
 			goto done;
 		file_ofs += sizeof phdr;
@@ -502,6 +500,7 @@ load (const char *file_name, struct intr_frame *if_, char **argv, int argc) {
 					if (!load_segment (file, file_page, (void *) mem_page,
 								read_bytes, zero_bytes, writable))
 						goto done;
+					file_deny_write(file);
 				}
 				else
 					goto done;
@@ -541,16 +540,11 @@ load (const char *file_name, struct intr_frame *if_, char **argv, int argc) {
 		memcpy(if_->rsp, &argv[i], sizeof(char *));
 	}
 
-
 	// push argv[0]
 	if_->R.rsi = if_->rsp + sizeof(char *);
 
-
  /* Push argc */
 	if_->R.rdi = argc;
-
-	
-	
 
  /* Push fake return address */
 
@@ -560,10 +554,9 @@ load (const char *file_name, struct intr_frame *if_, char **argv, int argc) {
 
 	success = true;
 
-
 done:
 	/* We arrive here whether the load is successful or not. */
-	file_close (file);
+	// file_close (file);
 	return success;
 }
 

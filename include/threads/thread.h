@@ -8,7 +8,7 @@
 #ifdef VM
 #include "vm/vm.h"
 #endif
-
+#define USERPROG
 
 /* States in a thread's life cycle. */
 enum thread_status {
@@ -105,14 +105,18 @@ struct thread {
 	struct list_elem d_elem;
 	struct lock *wait_on_lock;
 	struct list file_descriptors;
+	struct intr_frame parent_if;
 	struct list children;
 	struct list_elem child_elem;
 	struct list waited_children;
 	tid_t waited_tid;
 	struct semaphore exit_sema;
+	struct semaphore free_sema;
+	struct semaphore fork_sema;
 	int exit_status;
-#ifdef USERPROG
+	struct file *running_file;
 	/* Owned by userprog/process.c. */
+#ifdef USERPROG
 	uint64_t *pml4;                     /* Page map level 4 */
 #endif
 #ifdef VM

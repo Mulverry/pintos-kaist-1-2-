@@ -131,6 +131,15 @@ void exit (int status) {
 	struct thread *cur = thread_current();
 	cur->exit_status = status;
 	printf("%s: exit(%d)\n", thread_name(), status);
+	for (int fd = 2; fd < 127; fd++) {
+		struct file_descriptor *file_desc = find_file_descriptor(fd);
+    if (file_desc != NULL) {
+        file_close(file_desc->file);
+        list_remove(&file_desc->elem);
+        palloc_free_page(file_desc);
+		file_desc = NULL;
+    }
+	}
 	thread_exit();
 }
 
@@ -206,18 +215,14 @@ int open (const char *file) {
 	if ((is_user_vaddr(file) == false) || (file == NULL) || (pml4_get_page (thread_current()->pml4, file) == NULL))
 		exit(-1);
 	if (file == NULL) return -1;
-	
 	struct file *file_ = filesys_open(file);
-	if (file_ == NULL) {
-	return -1;
-	}
+	if (file_ == NULL) 	return -1;
 	
 	struct file_descriptor *file_desc = palloc_get_page(0);
 
 	file_desc->fd = allocate_fd();
 	file_desc->file = file_;
-
-
+	
 	list_push_back(&thread_current()->file_descriptors, &file_desc->elem);
 	
 	if (file_desc->fd >= 0) return file_desc->fd;
@@ -248,7 +253,6 @@ int read (int fd, void *buffer, unsigned size) {
 		
 
 	struct file_descriptor *file_ = find_file_descriptor(fd);
-
 	if (file_ == NULL)	return -1;
 	else return file_read(file_->file, buffer, size);
 
@@ -257,7 +261,6 @@ int read (int fd, void *buffer, unsigned size) {
 int write (int fd, const void *buffer, unsigned size) {
 
 	struct file_descriptor *file_desc = find_file_descriptor(fd);
-	
 	if (fd == 1) {
 		putbuf(buffer, size);
 
@@ -265,6 +268,7 @@ int write (int fd, const void *buffer, unsigned size) {
 		if (!file_desc) {
 			return -1;
 		}
+
 		return file_write(file_desc->file, buffer, size);
 	}
 }
@@ -273,7 +277,6 @@ int write (int fd, const void *buffer, unsigned size) {
 void seek (int fd, unsigned position) {
 	struct file_descriptor *file_desc = find_file_descriptor(fd);
 	file_seek(file_desc->file, position);
-
 }
 unsigned tell (int fd) {
 
@@ -283,12 +286,13 @@ unsigned tell (int fd) {
 
 
 void close (int fd) {
-	if (!fd || fd > 64) exit(-1);
+	if (!fd || fd > 128) exit(-1);
 	struct file_descriptor *file_desc = find_file_descriptor(fd);
     if (file_desc != NULL) {
         file_close(file_desc->file);
         list_remove(&file_desc->elem);
         palloc_free_page(file_desc);
+		file_desc = NULL;
     }
 
 }
@@ -309,7 +313,7 @@ struct file_descriptor *find_file_descriptor (int fd) {
 int allocate_fd (void) {
 	struct thread *cur = thread_current();
 	int fd = 2;
-	while (true) {
+	while (fd < 128) {
 		if (find_file_descriptor(fd) == NULL) return fd;
 		fd++;
 	}
