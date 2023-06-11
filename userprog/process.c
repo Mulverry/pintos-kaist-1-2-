@@ -30,7 +30,6 @@ static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_, char **argv, int argc);
 static void initd (void *f_name);
 static void __do_fork (void *);
-struct thread *get_child_thread(int pid);
 
 /* General process initializer for initd and other process. */
 static void
@@ -54,11 +53,11 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
-	char *save_ptr, *first_token; 
-	first_token = strtok_r(fn_copy, " ", &save_ptr);
+	char *save_ptr;
+	strtok_r(fn_copy, " ", &save_ptr);
 
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (first_token, PRI_DEFAULT, initd, file_name);
+	tid = thread_create (fn_copy, PRI_DEFAULT, initd, file_name);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	return tid;
@@ -105,17 +104,15 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	bool writable;
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
-	if is_kernel_vaddr(va)
-		return false;
-
+	if (is_kernel_vaddr(va)) return true;
 	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page (parent->pml4, va);
 	if (parent_page == NULL)	return false;
 
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
-	newpage = palloc_get_page(PAL_USER| PAL_ZERO);  // 페이지를 유저 풀에서 할당하고 모든 바이트를 0으로 초기화하라.- flags(페이지 할당방법) 사용
-	if (newpage == NULL) return false;
+	newpage = palloc_get_page(PAL_USER);
+	if (newpage == NULL)		return false;
 
 	/* 4. TODO: Duplicate parent's page to the new page and
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
@@ -141,17 +138,19 @@ static void
 __do_fork (void *aux) {
 	struct intr_frame if_;
 	struct thread *parent = (struct thread *) aux;
-	struct thread *current = thread_current();
+	struct thread *current = thread_current ();
 	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame *parent_if = &parent->parent_if;
+	struct intr_frame *parent_if;
 	bool succ = true;
 
-	/* 1. Read the cpu context to local stack.
-	부모 스레드의 중단된 프레임 정보를 if_ 구조체로 복사. => 부모 스레드의 상태를 현재 스레드로 복사 */
+	parent_if = &parent->parent_if;
+
+
+	/* 1. Read the cpu context to local stack. */
 	memcpy (&if_, parent_if, sizeof (struct intr_frame));
 
 	/* 2. Duplicate PT */
-	current->pml4 = pml4_create(); // 현재 스레드의 페이지 테이블을 생성하여 current->pml4에 할당
+	current->pml4 = pml4_create();
 	if (current->pml4 == NULL)
 		goto error;
 
@@ -161,7 +160,7 @@ __do_fork (void *aux) {
 	if (!supplemental_page_table_copy (&current->spt, &parent->spt))
 		goto error;
 #else
-	if (!pml4_for_each (parent->pml4, duplicate_pte, parent))  //부모 프로세스의 페이지 테이블을 순회하고, 자식의 각 페이지 테이블 엔트리에 부모 프로세스의 페이지 테이블 엔트리를 복제
+	if (!pml4_for_each (parent->pml4, duplicate_pte, parent))
 		goto error;
 #endif
 
@@ -170,21 +169,6 @@ __do_fork (void *aux) {
 	 * TODO:       in include/filesys/file.h. Note that parent should not return
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
-
-
-	// if (parent->fdidx >= 64) goto error;
-	// current->file_descriptors_table[0] = parent->file_descriptors_table[0];
-	// current->file_descriptors_table[1] = parent->file_descriptors_table[1];
-
-	// for (int i= 2; i< 64; i++){
-	// 	struct file *file = parent->file_descriptors_table[i];
-	// 	if (file == NULL) continue;
-	// 	current->file_descriptors_table[i] = file_duplicate(i);
-	// }
-
-	// current->fdidx = parent->fdidx;
-	// sema_up(&current->fork_sema);
-	// if_.R.rax = 0;
 
 	struct list_elem *e;
 	for (e = list_begin(&parent->file_descriptors); e != list_end(&parent->file_descriptors); e = list_next(e)) {
@@ -239,18 +223,19 @@ process_exec (void *f_name) {
 	for (argv[argc] = strtok_r(file_name_, " ", &save_ptr); argv[argc] != NULL; argv[argc] = strtok_r(NULL, " ", &save_ptr)) {
 		argc++;
 	}
-
+	// 스택에 저장
 
 	/* We first kill the current context */
-	process_cleanup();
+	process_cleanup ();
 
 	/* And then load the binary */
 
 	// success = load (fn_copy_, &_if);
 	success = load (file_name_, &_if, argv, argc);
-	palloc_free_page (file_name_);
 
 	/* If load failed, quit. */
+
+	palloc_free_page (file_name_);
 	if (!success)
 		return -1;
 
@@ -271,8 +256,9 @@ process_exec (void *f_name) {
 
 struct thread *get_child_thread(tid_t child_tid) {
     struct thread *cur = thread_current();
+    struct list_elem *e;
 
-    for (struct list_elem *e = list_begin(&cur->child_list); e != list_end(&cur->child_list); e = list_next(e)) {
+    for (e = list_begin(&cur->children); e != list_end(&cur->children); e = list_next(e)) {
         struct thread *t = list_entry(e, struct thread, child_elem);
         if (t->tid == child_tid) {
             return t;
@@ -281,9 +267,9 @@ struct thread *get_child_thread(tid_t child_tid) {
     return NULL;
 }
 
-// void remove_child_thread(struct thread *child) {
-//     list_remove(&child->child_elem);
-// }
+void remove_child_thread(struct thread *child) {
+    list_remove(&child->child_elem);
+}
 
 int
 process_wait (tid_t child_tid UNUSED) {
@@ -312,17 +298,10 @@ process_wait (tid_t child_tid UNUSED) {
 	sema_up(&t->free_sema);
 	remove_child_thread(t);	
 	return exit_status;
-
 	
 	// tid가 커널에 의해 종료되었다면 -1반환
 	return -1;
-// struct thread *child = get_child_thread(child_tid);
-// 	if (child != NULL) {
-// 		sema_down(&child->wait_sema);
-// 		int exit_status = child->exit_status;
-// 		list_remove(&child->child_elem);
-// 		sema_up(&child->wait_sema);
-// 		return exit_status;}
+
 }
 
 	/* TODO: Your code goes here.
@@ -335,10 +314,8 @@ void
 process_exit (void) {
 	struct thread *curr = thread_current ();
 	sema_up(&curr->exit_sema);
+	file_close(curr->running_file);
 	sema_down(&curr->free_sema);
-	
-	// printf ("%s: exit(%d)\n", thread_name(), curr->exit_status);
-
 	process_cleanup ();
 }
 
@@ -464,6 +441,7 @@ load (const char *file_name, struct intr_frame *if_, char **argv, int argc) {
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
 	}
+	t->running_file = file;
 
 	/* Read and verify executable header. */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -485,7 +463,6 @@ load (const char *file_name, struct intr_frame *if_, char **argv, int argc) {
 		if (file_ofs < 0 || file_ofs > file_length (file))
 			goto done;
 		file_seek (file, file_ofs);
-
 		if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
 			goto done;
 		file_ofs += sizeof phdr;
@@ -523,6 +500,7 @@ load (const char *file_name, struct intr_frame *if_, char **argv, int argc) {
 					if (!load_segment (file, file_page, (void *) mem_page,
 								read_bytes, zero_bytes, writable))
 						goto done;
+					file_deny_write(file);
 				}
 				else
 					goto done;
@@ -549,6 +527,7 @@ load (const char *file_name, struct intr_frame *if_, char **argv, int argc) {
 	}
 
  /* Word align */
+ 
 	if_->rsp -= (size_t)if_->rsp % 8;
 
  /* Push null pointer sentinel */
@@ -568,16 +547,16 @@ load (const char *file_name, struct intr_frame *if_, char **argv, int argc) {
 	if_->R.rdi = argc;
 
  /* Push fake return address */
+
 	*(void **)if_->rsp = NULL;
 
-	hex_dump((uintptr_t) if_->rsp, if_->rsp, USER_STACK - (uintptr_t)if_->rsp, true);
+	// hex_dump((uintptr_t) if_->rsp, if_->rsp, USER_STACK - (uintptr_t)if_->rsp, true);
 
 	success = true;
 
-
 done:
 	/* We arrive here whether the load is successful or not. */
-	file_close (file);
+	// file_close (file);
 	return success;
 }
 
